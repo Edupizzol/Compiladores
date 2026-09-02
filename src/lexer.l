@@ -20,6 +20,7 @@
 [0-9]+          { yylval.val.i_val = atoi(yytext); return INT_NUMBER; }
 [a-zA-Z_][a-zA-Z0-9_]* { yylval.val.s_val = strdup(yytext); return IDENTIFIER; }
 
+"=="            { return COMP; }
 "="             { return ASSIGN; }
 ";"             { return SEMICOLON; }
 "{"             { return LBRACE; }
