@@ -20,10 +20,20 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
     char *str;
 }
 
+/* expoe yytname pra token_name() (usado pelo modo --tokens do main.c) */
+%token-table
+
 %token <val> IDENTIFIER INT_NUMBER FLOAT_NUMBER
 %token <data_type> TYPE_KW
 %token RETURN ASSIGN SEMICOLON LBRACE RBRACE LPAREN RPAREN
 %token PLUS MINUS STAR MOD XOR OR BINOR AND EC SHIFTL SHIFTR COMP
+
+/* tokens do lexico completo (issue #2) - a gramatica ainda nao usa todos */
+%token <val> CHAR_LITERAL STRING_LITERAL
+%token STRUCT IF ELSE WHILE FOR BREAK CONTINUE
+%token NE LT GT LE GE NOT SLASH DOT ARROW
+%token INC DEC ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
+%token AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
 %type <data_type> type_specifier
@@ -167,3 +177,7 @@ extern char *yytext;
 void yyerror(const char *s) {
     fprintf(stderr, "Erro sintático na linha %d: %s (próximo a '%s')\n", yylineno, s, yytext);
 }
+
+const char *token_name(int tok) {
+    return yytname[YYTRANSLATE(tok)];
+}
