@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "types.h"
 
 void yyerror(const char *s);
@@ -12,6 +13,23 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
     sprintf(buf, "%s %s %s", lhs, op, rhs);
     return buf;
 }
+
+/* monta strings de codegen maiores (if/while/for) sem contar tamanho na mao */
+static char *format_str(const char *fmt, ...) {
+    va_list args, args_copy;
+    va_start(args, fmt);
+    va_copy(args_copy, args);
+    int len = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    char *buf = malloc(len + 1);
+    vsnprintf(buf, len + 1, fmt, args_copy);
+    va_end(args_copy);
+    return buf;
+}
+
+/* tipo da declaracao em andamento, setado pela acao intermediaria em
+   `type_specifier` antes de reduzir declarator_list (statement e for_init) */
+static DataType current_decl_type;
 
 /* comparacoes saem sempre entre parenteses: em Rust elas tem precedencia
    menor que & ^ | (em C e o contrario) e nao podem ser encadeadas, entao
@@ -58,6 +76,7 @@ static int is_wrapped(const char *s) {
 %token <data_type> TYPE_KW
 %token RETURN ASSIGN SEMICOLON LBRACE RBRACE LPAREN RPAREN
 %token PLUS MINUS STAR MOD XOR OR BINOR AND EC SHIFTL SHIFTR COMP
+%token IF ELSE WHILE FOR BREAK CONTINUE
 
 /* tokens do lexico completo (issue #2) - a gramatica ainda nao usa todos */
 %token <val> CHAR_LITERAL STRING_LITERAL
@@ -67,6 +86,7 @@ static int is_wrapped(const char *s) {
 %token AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
+%type <str> declarator declarator_list for_init for_cond for_incr
 %type <str> opt_arg_list arg_list
 %type <data_type> type_specifier
 
@@ -82,6 +102,10 @@ static int is_wrapped(const char *s) {
 %left PLUS MINUS
 %left STAR SLASH MOD
 %precedence NOT UMINUS
+
+/* dangling-else: favorece o shift do ELSE, amarrando ao if mais próximo */
+%precedence IFX
+%precedence ELSE
 
 %%
 
@@ -156,10 +180,8 @@ statement_list:
 ;
 
 statement:
-    type_specifier IDENTIFIER ASSIGN expr SEMICOLON {
-        char *buf = malloc(strlen($2.s_val) + strlen($4) + strlen(type_to_rust($1)) + 32);
-        sprintf(buf, "    let mut %s: %s = %s;\n", $2.s_val, type_to_rust($1), $4);
-        $$ = buf;
+    type_specifier { current_decl_type = $1; } declarator_list SEMICOLON {
+        $$ = $3;
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
         char *buf = malloc(strlen($1.s_val) + strlen($3) + 32);
@@ -170,6 +192,66 @@ statement:
         char *buf = malloc(strlen($2) + 32);
         sprintf(buf, "    // return %s;\n", $2);
         $$ = buf;
+    }
+    | IF LPAREN expr RPAREN statement %prec IFX {
+        $$ = format_str("    if %s {\n%s    }\n", $3, $5);
+    }
+    | IF LPAREN expr RPAREN statement ELSE statement {
+        $$ = format_str("    if %s {\n%s    } else {\n%s    }\n", $3, $5, $7);
+    }
+    | WHILE LPAREN expr RPAREN statement {
+        $$ = format_str("    while %s {\n%s    }\n", $3, $5);
+    }
+    | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
+        $$ = format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
+                         $3, $5, $9, $7);
+    }
+    | LBRACE statement_list RBRACE {
+        $$ = format_str("    {\n%s    }\n", $2);
+    }
+    | LBRACE RBRACE {
+        $$ = strdup("    {}\n");
+    }
+    | BREAK SEMICOLON {
+        $$ = strdup("    break;\n");
+    }
+    | CONTINUE SEMICOLON {
+        $$ = strdup("    continue;\n");
+    }
+;
+
+/* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
+for_init:
+    /* vazio */ { $$ = strdup(""); }
+    | type_specifier { current_decl_type = $1; } declarator_list { $$ = $3; }
+    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;\n", $1.s_val, $3); }
+;
+
+for_cond:
+    /* vazio */ { $$ = strdup("true"); }
+    | expr { $$ = $1; }
+;
+
+for_incr:
+    /* vazio */ { $$ = strdup(""); }
+    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;", $1.s_val, $3); }
+;
+
+/* uma variavel dentro de uma declaracao, com ou sem inicializacao:
+   `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
+declarator:
+    IDENTIFIER {
+        $$ = format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type));
+    }
+    | IDENTIFIER ASSIGN expr {
+        $$ = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3);
+    }
+;
+
+declarator_list:
+    declarator { $$ = $1; }
+    | declarator_list ',' declarator {
+        $$ = format_str("%s%s", $1, $3);
     }
 ;
 
@@ -249,4 +331,4 @@ void yyerror(const char *s) {
 
 const char *token_name(int tok) {
     return yytname[YYTRANSLATE(tok)];
-}
+}
