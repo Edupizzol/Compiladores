@@ -12,6 +12,37 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
     sprintf(buf, "%s %s %s", lhs, op, rhs);
     return buf;
 }
+
+/* comparacoes saem sempre entre parenteses: em Rust elas tem precedencia
+   menor que & ^ | (em C e o contrario) e nao podem ser encadeadas, entao
+   `a & b == c` precisa virar `a & (b == c)` pra manter o agrupamento de C */
+static char *cmp_expr(char *lhs, const char *op, char *rhs) {
+    char *buf = malloc(strlen(lhs) + strlen(op) + strlen(rhs) + 6);
+    sprintf(buf, "(%s %s %s)", lhs, op, rhs);
+    return buf;
+}
+
+static char *unop_expr(const char *op, char *operand) {
+    /* `- -a` nao pode colar em `--a`, que parece o decremento de C */
+    const char *sep = (op[0] == '-' && operand[0] == '-') ? " " : "";
+    char *buf = malloc(strlen(op) + strlen(sep) + strlen(operand) + 1);
+    sprintf(buf, "%s%s%s", op, sep, operand);
+    return buf;
+}
+
+/* 1 se a expressao inteira ja esta entre um unico par de parenteses,
+   ex. "(a == b)" -> 1, "(a) + (b)" -> 0 */
+static int is_wrapped(const char *s) {
+    size_t len = strlen(s);
+    if (len < 2 || s[0] != '(' || s[len - 1] != ')') return 0;
+    int depth = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '(') depth++;
+        else if (s[i] == ')') depth--;
+        if (depth == 0 && i < len - 1) return 0;
+    }
+    return 1;
+}
 %}
 
 %union {
@@ -36,16 +67,21 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
 %token AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
+%type <str> opt_arg_list arg_list
 %type <data_type> type_specifier
 
+/* precedencia e associatividade de C, da menor pra maior */
 %left OR
 %left AND
 %left BINOR
 %left XOR
 %left EC
+%left COMP NE
+%left LT GT LE GE
 %left SHIFTL SHIFTR
 %left PLUS MINUS
-%left STAR MOD
+%left STAR SLASH MOD
+%precedence NOT UMINUS
 
 %%
 
@@ -152,13 +188,23 @@ expr:
         $$ = strdup($1.s_val);
     }
     | LPAREN expr RPAREN {
-        char *buf = malloc(strlen($2) + 3);
-        sprintf(buf, "(%s)", $2);
+        if (is_wrapped($2)) {
+            $$ = $2; /* ex. (a == b) ja vem entre parenteses do cmp_expr */
+        } else {
+            char *buf = malloc(strlen($2) + 3);
+            sprintf(buf, "(%s)", $2);
+            $$ = buf;
+        }
+    }
+    | IDENTIFIER LPAREN opt_arg_list RPAREN {
+        char *buf = malloc(strlen($1.s_val) + strlen($3) + 3);
+        sprintf(buf, "%s(%s)", $1.s_val, $3);
         $$ = buf;
     }
     | expr PLUS expr    { $$ = binop_expr($1, "+", $3); }
     | expr MINUS expr   { $$ = binop_expr($1, "-", $3); }
     | expr STAR expr    { $$ = binop_expr($1, "*", $3); }
+    | expr SLASH expr   { $$ = binop_expr($1, "/", $3); }
     | expr MOD expr     { $$ = binop_expr($1, "%", $3); }
     | expr XOR expr     { $$ = binop_expr($1, "^", $3); }
     | expr OR expr      { $$ = binop_expr($1, "||", $3); }
@@ -167,6 +213,29 @@ expr:
     | expr EC expr      { $$ = binop_expr($1, "&", $3); }
     | expr SHIFTL expr  { $$ = binop_expr($1, "<<", $3); }
     | expr SHIFTR expr  { $$ = binop_expr($1, ">>", $3); }
+    | expr COMP expr    { $$ = cmp_expr($1, "==", $3); }
+    | expr NE expr      { $$ = cmp_expr($1, "!=", $3); }
+    | expr LT expr      { $$ = cmp_expr($1, "<", $3); }
+    | expr GT expr      { $$ = cmp_expr($1, ">", $3); }
+    | expr LE expr      { $$ = cmp_expr($1, "<=", $3); }
+    | expr GE expr      { $$ = cmp_expr($1, ">=", $3); }
+    | NOT expr          { $$ = unop_expr("!", $2); }
+    | MINUS expr %prec UMINUS { $$ = unop_expr("-", $2); }
+;
+
+/* argumentos de uma chamada: f(), f(a) ou f(a, b + 1, g(c)) */
+opt_arg_list:
+    arg_list { $$ = $1; }
+    | /* vazio */ { $$ = strdup(""); }
+;
+
+arg_list:
+    expr { $$ = $1; }
+    | arg_list ',' expr {
+        char *buf = malloc(strlen($1) + strlen($3) + 3);
+        sprintf(buf, "%s, %s", $1, $3);
+        $$ = buf;
+    }
 ;
 
 %%

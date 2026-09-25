@@ -53,10 +53,12 @@ nas ações do `parser.y`.
   `float`, `double`, `char`, `void`).
 - Declaração de variável com e sem inicialização, inclusive múltiplas
   variáveis na mesma declaração (`int a, b, c;`).
-- Expressões aritméticas, bitwise e lógicas (`+ - * % ^ | & << >> && ||`),
-  chamada de função como expressão e comparações — ver branch
-  `feat/expr-operadores` (ainda não mergeada na `main`; expande o `expr` que
-  hoje só cobre parte dos operadores).
+- Expressões com todos os operadores binários de C (`* / % + - << >> < > <=
+  >= == != & ^ | && ||`), unários `-` e `!`, parênteses e chamada de função
+  como expressão (`f()`, `f(a, b + 1, g(c))`), com a precedência e a
+  associatividade de C. Comparações saem sempre entre parênteses no Rust
+  gerado, porque lá elas têm precedência menor que `& ^ |` e não podem ser
+  encadeadas.
 - Comandos de controle de fluxo: `if`/`else` (com dangling-else resolvido
   via `%precedence`), `while`, `for` (as três seções, todas opcionais),
   blocos `{ }` aninhados, `break` e `continue`.
@@ -68,6 +70,8 @@ nas ações do `parser.y`.
 (funções, parâmetros, declarações). `tests/inputs/tarefa2_controle_fluxo.c`
 cobre especificamente if/else, while, for e break/continue — rode com
 `./compiler tests/inputs/tarefa2_controle_fluxo.c`.
+`tests/inputs/tarefa1_expressoes.c` cobre precedência, unários e chamada de
+função — rode com `./compiler tests/inputs/tarefa1_expressoes.c`.
 `tests/inputs/lexico.c` passa por todos os tokens do léxico — rode com
 `./compiler --tokens tests/inputs/lexico.c` e confira os tokens e as linhas.
 
