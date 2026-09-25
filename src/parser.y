@@ -166,6 +166,12 @@ statement:
     | LBRACE RBRACE {
         $$ = strdup("    {}\n");
     }
+    | BREAK SEMICOLON {
+        $$ = strdup("    break;\n");
+    }
+    | CONTINUE SEMICOLON {
+        $$ = strdup("    continue;\n");
+    }
 ;
 
 /* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
