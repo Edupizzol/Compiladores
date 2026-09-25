@@ -34,7 +34,7 @@ $(TARGET): $(BISON_OUT) $(FLEX_OUT) $(EXTRA_SRCS)
 
 # Roda o compilador em cima de um arquivo de teste
 run: $(TARGET)
-	./$(TARGET) tests/inputs/exemplo.rs
-
+	./$(TARGET) tests/inputs/exemplo.c
+	
 clean:
 	rm -f $(TARGET) $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)
