@@ -7,6 +7,7 @@
 %}
 
 %option noyywrap
+%option yylineno
 
 %%
 
@@ -23,6 +24,7 @@
 "=="            { return COMP; }
 "="             { return ASSIGN; }
 ";"             { return SEMICOLON; }
+","             { return ','; }
 "{"             { return LBRACE; }
 "}"             { return RBRACE; }
 "("             { return LPAREN; }

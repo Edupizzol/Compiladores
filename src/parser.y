@@ -25,7 +25,7 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
 %token RETURN ASSIGN SEMICOLON LBRACE RBRACE LPAREN RPAREN
 %token PLUS MINUS STAR MOD XOR OR BINOR AND EC SHIFTL SHIFTR COMP
 
-%type <str> statement_list statement expr
+%type <str> statement_list statement expr function_list function opt_param_list param_list param
 %type <data_type> type_specifier
 
 %left OR
@@ -40,8 +40,59 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
 %%
 
 program:
-    type_specifier IDENTIFIER LPAREN RPAREN LBRACE statement_list RBRACE {
-        printf("fn %s() -> %s {\n%s}\n", $2.s_val, type_to_rust($1), $6);
+    function_list {
+        printf("%s", $1);
+    }
+;
+
+function_list:
+    function {
+        $$ = $1;
+    }
+    | function_list function {
+        char *buf = malloc(strlen($1) + strlen($2) + 2);
+        sprintf(buf, "%s\n%s", $1, $2);
+        $$ = buf;
+    }
+;
+
+function:
+    type_specifier IDENTIFIER LPAREN opt_param_list RPAREN LBRACE statement_list RBRACE {
+        const char *ret_type = type_to_rust($1);
+        char *buf = malloc(strlen($2.s_val) + strlen($4) + strlen(ret_type) + strlen($7) + 32);
+        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4, ret_type, $7);
+        $$ = buf;
+    }
+;
+
+opt_param_list:
+    param_list {
+        $$ = $1;
+    }
+    | /* vazio */ {
+        char *buf = malloc(1);
+        buf[0] = '\0';
+        $$ = buf;
+    }
+;
+
+param_list:
+    param {
+        $$ = $1;
+    }
+    | param_list ',' param {
+        char *buf = malloc(strlen($1) + strlen($3) + 3);
+        sprintf(buf, "%s, %s", $1, $3);
+        $$ = buf;
+    }
+;
+
+param:
+    type_specifier IDENTIFIER {
+        const char *t = type_to_rust($1);
+        char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
+        sprintf(buf, "%s: %s", $2.s_val, t);
+        $$ = buf;
     }
 ;
 
@@ -110,10 +161,9 @@ expr:
 
 %%
 
-void yyerror(const char *s) {
-    fprintf(stderr, "Erro sintático: %s\n", s);
-}
+extern int yylineno;
+extern char *yytext;
 
-int main(void) {
-    return yyparse();
+void yyerror(const char *s) {
+    fprintf(stderr, "Erro sintático na linha %d: %s (próximo a '%s')\n", yylineno, s, yytext);
 }
