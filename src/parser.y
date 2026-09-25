@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "types.h"
 
 void yyerror(const char *s);
@@ -12,6 +13,23 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
     sprintf(buf, "%s %s %s", lhs, op, rhs);
     return buf;
 }
+
+/* monta strings de codegen maiores (if/while/for) sem contar tamanho na mao */
+static char *format_str(const char *fmt, ...) {
+    va_list args, args_copy;
+    va_start(args, fmt);
+    va_copy(args_copy, args);
+    int len = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    char *buf = malloc(len + 1);
+    vsnprintf(buf, len + 1, fmt, args_copy);
+    va_end(args_copy);
+    return buf;
+}
+
+/* tipo da declaracao em andamento, setado pela acao intermediaria em
+   `type_specifier` antes de reduzir declarator_list (statement e for_init) */
+static DataType current_decl_type;
 %}
 
 %union {
@@ -27,6 +45,7 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
 %token IF ELSE WHILE FOR BREAK CONTINUE
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
+%type <str> declarator declarator_list
 %type <data_type> type_specifier
 
 %left OR
@@ -111,10 +130,8 @@ statement_list:
 ;
 
 statement:
-    type_specifier IDENTIFIER ASSIGN expr SEMICOLON {
-        char *buf = malloc(strlen($2.s_val) + strlen($4) + strlen(type_to_rust($1)) + 32);
-        sprintf(buf, "    let mut %s: %s = %s;\n", $2.s_val, type_to_rust($1), $4);
-        $$ = buf;
+    type_specifier { current_decl_type = $1; } declarator_list SEMICOLON {
+        $$ = $3;
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
         char *buf = malloc(strlen($1.s_val) + strlen($3) + 32);
@@ -125,6 +142,24 @@ statement:
         char *buf = malloc(strlen($2) + 32);
         sprintf(buf, "    // return %s;\n", $2);
         $$ = buf;
+    }
+;
+
+/* uma variavel dentro de uma declaracao, com ou sem inicializacao:
+   `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
+declarator:
+    IDENTIFIER {
+        $$ = format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type));
+    }
+    | IDENTIFIER ASSIGN expr {
+        $$ = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3);
+    }
+;
+
+declarator_list:
+    declarator { $$ = $1; }
+    | declarator_list ',' declarator {
+        $$ = format_str("%s%s", $1, $3);
     }
 ;
 
