@@ -160,6 +160,12 @@ statement:
         $$ = format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
                          $3, $5, $9, $7);
     }
+    | LBRACE statement_list RBRACE {
+        $$ = format_str("    {\n%s    }\n", $2);
+    }
+    | LBRACE RBRACE {
+        $$ = strdup("    {}\n");
+    }
 ;
 
 /* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
