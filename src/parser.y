@@ -57,6 +57,10 @@ static DataType current_decl_type;
 %left PLUS MINUS
 %left STAR MOD
 
+/* dangling-else: favorece o shift do ELSE, amarrando ao if mais próximo */
+%precedence IFX
+%precedence ELSE
+
 %%
 
 program:
@@ -142,6 +146,12 @@ statement:
         char *buf = malloc(strlen($2) + 32);
         sprintf(buf, "    // return %s;\n", $2);
         $$ = buf;
+    }
+    | IF LPAREN expr RPAREN statement %prec IFX {
+        $$ = format_str("    if %s {\n%s    }\n", $3, $5);
+    }
+    | IF LPAREN expr RPAREN statement ELSE statement {
+        $$ = format_str("    if %s {\n%s    } else {\n%s    }\n", $3, $5, $7);
     }
 ;
 
