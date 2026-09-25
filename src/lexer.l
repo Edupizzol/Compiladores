@@ -17,6 +17,13 @@
 
 "return"        { return RETURN; }
 
+"if"            { return IF; }
+"else"          { return ELSE; }
+"while"         { return WHILE; }
+"for"           { return FOR; }
+"break"         { return BREAK; }
+"continue"      { return CONTINUE; }
+
 [0-9]+\.[0-9]+  { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
 [0-9]+          { yylval.val.i_val = atoi(yytext); return INT_NUMBER; }
 [a-zA-Z_][a-zA-Z0-9_]* { yylval.val.s_val = strdup(yytext); return IDENTIFIER; }

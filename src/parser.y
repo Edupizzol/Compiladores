@@ -24,6 +24,7 @@ static char *binop_expr(char *lhs, const char *op, char *rhs) {
 %token <data_type> TYPE_KW
 %token RETURN ASSIGN SEMICOLON LBRACE RBRACE LPAREN RPAREN
 %token PLUS MINUS STAR MOD XOR OR BINOR AND EC SHIFTL SHIFTR COMP
+%token IF ELSE WHILE FOR BREAK CONTINUE
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
 %type <data_type> type_specifier
