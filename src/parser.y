@@ -45,7 +45,7 @@ static DataType current_decl_type;
 %token IF ELSE WHILE FOR BREAK CONTINUE
 
 %type <str> statement_list statement expr function_list function opt_param_list param_list param
-%type <str> declarator declarator_list
+%type <str> declarator declarator_list for_init for_cond for_incr
 %type <data_type> type_specifier
 
 %left OR
@@ -153,6 +153,30 @@ statement:
     | IF LPAREN expr RPAREN statement ELSE statement {
         $$ = format_str("    if %s {\n%s    } else {\n%s    }\n", $3, $5, $7);
     }
+    | WHILE LPAREN expr RPAREN statement {
+        $$ = format_str("    while %s {\n%s    }\n", $3, $5);
+    }
+    | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
+        $$ = format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
+                         $3, $5, $9, $7);
+    }
+;
+
+/* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
+for_init:
+    /* vazio */ { $$ = strdup(""); }
+    | type_specifier { current_decl_type = $1; } declarator_list { $$ = $3; }
+    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;\n", $1.s_val, $3); }
+;
+
+for_cond:
+    /* vazio */ { $$ = strdup("true"); }
+    | expr { $$ = $1; }
+;
+
+for_incr:
+    /* vazio */ { $$ = strdup(""); }
+    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;", $1.s_val, $3); }
 ;
 
 /* uma variavel dentro de uma declaracao, com ou sem inicializacao:
