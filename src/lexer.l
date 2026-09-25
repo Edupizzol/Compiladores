@@ -21,7 +21,11 @@
 [a-zA-Z_][a-zA-Z0-9_]* { yylval.val.s_val = strdup(yytext); return IDENTIFIER; }
 
 "=="            { return COMP; }
+"!="            { return NE; }
+"<="            { return LE; }
+">="            { return GE; }
 "="             { return ASSIGN; }
+","             { return COMMA; }
 ";"             { return SEMICOLON; }
 "{"             { return LBRACE; }
 "}"             { return RBRACE; }
@@ -35,9 +39,13 @@
 "%"             { return MOD; }
 "<<"            { return SHIFTL; }
 ">>"            { return SHIFTR; }
+"<"             { return LT; }
+">"             { return GT; }
+"!"             { return NOT; }
 "+"             { return PLUS; }
 "-"             { return MINUS; }
 "*"             { return STAR; }
+"/"             { return SLASH; }
 [ \t\n\r]+      /* ignora espaços */ ;
 .               { printf("Caractere desconhecido: %s\n", yytext); }
 

@@ -2,7 +2,7 @@
 # Ajuste os nomes de arquivo (src/parser.y, src/lexer.l, etc.) conforme o projeto de vocês.
 
 CC      = gcc
-CFLAGS  = -Wall -g
+CFLAGS  = -Wall -g -I$(SRC_DIR)
 TARGET  = compiler
 
 SRC_DIR = src
@@ -34,7 +34,7 @@ $(TARGET): $(BISON_OUT) $(FLEX_OUT) $(EXTRA_SRCS)
 
 # Roda o compilador em cima de um arquivo de teste
 run: $(TARGET)
-	./$(TARGET) tests/inputs/exemplo.rs
+	./$(TARGET) tests/inputs/exemplo.c
 
 clean:
 	rm -f $(TARGET) $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)
