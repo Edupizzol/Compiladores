@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include "types.h"
+#include "options.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -111,7 +112,9 @@ static int is_wrapped(const char *s) {
 
 program:
     function_list {
-        printf("%s", $1);
+        /* o Rust so sai quando nenhuma flag de analise esta ligada
+           (--tree, --dot, --symtab): a saida e a analise, nao o codigo */
+        if (emit_code) printf("%s", $1);
     }
 ;
 

@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include "options.h"
 
 int yyparse(void);
 int yylex(void);
@@ -7,6 +10,26 @@ const char *token_name(int tok);
 extern FILE *yyin;
 extern char *yytext;
 extern int yylineno;
+extern void yyrestart(FILE *);
+
+/* flags ativas nesta execucao e o switch do codegen (ver options.h) */
+int g_options = 0;
+int emit_code = 1;
+
+static void usage(FILE *out, const char *prog) {
+    fprintf(out,
+        "uso: %s [opções] <arquivo.c>\n"
+        "\n"
+        "opções:\n"
+        "  --tokens    só roda o léxico e lista os tokens (linha, token, texto)\n"
+        "  --tree      imprime a árvore de derivação em texto\n"
+        "  --dot       exporta a árvore de derivação em formato Graphviz\n"
+        "  --symtab    imprime a tabela de símbolos\n"
+        "  --help      mostra esta ajuda\n"
+        "\n"
+        "as opções podem ser combinadas: %s --tree --dot arquivo.c\n",
+        prog, prog);
+}
 
 /* modo --tokens: so roda o lexico e lista os tokens, sem passar pelo parser */
 static int dump_tokens(void) {
@@ -17,20 +40,64 @@ static int dump_tokens(void) {
 }
 
 int main(int argc, char **argv) {
-    int tokens_only = 0;
-    if (argc > 1 && strcmp(argv[1], "--tokens") == 0) {
-        tokens_only = 1;
-        argv++;
-        argc--;
-    }
-    if (argc > 1) {
-        yyin = fopen(argv[1], "r");
-        if (!yyin) {
-            perror("fopen");
+    const char *prog = argc > 0 ? argv[0] : "compiler";
+    const char *input = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        const char *arg = argv[i];
+        if (strcmp(arg, "--tokens") == 0) {
+            g_options |= OPT_TOKENS;
+        } else if (strcmp(arg, "--tree") == 0) {
+            g_options |= OPT_TREE;
+        } else if (strcmp(arg, "--dot") == 0) {
+            g_options |= OPT_DOT;
+        } else if (strcmp(arg, "--symtab") == 0) {
+            g_options |= OPT_SYMTAB;
+        } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+            usage(stdout, prog);
+            return 0;
+        } else if (arg[0] == '-' && arg[1] != '\0') {
+            fprintf(stderr, "opção inválida: %s\n\n", arg);
+            usage(stderr, prog);
             return 1;
+        } else if (input != NULL) {
+            fprintf(stderr, "mais de um arquivo de entrada: %s e %s\n\n", input, arg);
+            usage(stderr, prog);
+            return 1;
+        } else {
+            input = arg;
         }
     }
-    int ret = tokens_only ? dump_tokens() : yyparse();
-    if (argc > 1 && yyin) fclose(yyin);
+
+    if (input == NULL) {
+        usage(stderr, prog);
+        return 1;
+    }
+
+    /* o Rust so e impresso se nenhuma flag de analise estiver ligada */
+    emit_code = (g_options & (OPT_TREE | OPT_DOT | OPT_SYMTAB)) == 0;
+
+    yyin = fopen(input, "r");
+    if (!yyin) {
+        perror("fopen");
+        return 1;
+    }
+
+    int ret;
+    if (g_options & OPT_TOKENS) {
+        ret = dump_tokens();
+        if (g_options & (OPT_TREE | OPT_DOT | OPT_SYMTAB)) {
+            /* combinado com uma flag de analise: volta pro comeco do arquivo
+               pra que o parser tambem possa rodar em cima dele */
+            rewind(yyin);
+            yyrestart(yyin);
+            yylineno = 1;
+            ret = yyparse();
+        }
+    } else {
+        ret = yyparse();
+    }
+
+    fclose(yyin);
     return ret;
 }
