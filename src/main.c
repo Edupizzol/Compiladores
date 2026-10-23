@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "options.h"
+#include "ast.h"
 
 int yyparse(void);
 int yylex(void);
@@ -99,5 +100,6 @@ int main(int argc, char **argv) {
     }
 
     fclose(yyin);
+    node_free(parse_root);
     return ret;
 }
