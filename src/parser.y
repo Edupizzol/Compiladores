@@ -111,8 +111,7 @@ static int is_wrapped(const char *s) {
 
 %type <node> statement_list statement expr function_list function opt_param_list param_list param
 %type <node> declarator declarator_list for_init for_cond for_incr
-%type <node> opt_arg_list arg_list
-%type <data_type> type_specifier
+%type <node> opt_arg_list arg_list type_specifier
 
 /* precedencia e associatividade de C, da menor pra maior */
 %left OR
@@ -144,7 +143,7 @@ program:
 
 function_list:
     function {
-        $$ = $1;
+        $$ = mk("function_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | function_list function {
         char *buf = malloc(strlen($1->code) + strlen($2->code) + 2);
@@ -155,46 +154,54 @@ function_list:
 
 function:
     type_specifier IDENTIFIER LPAREN opt_param_list RPAREN LBRACE statement_list RBRACE {
-        const char *ret_type = type_to_rust($1);
+        const char *ret_type = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen($4->code) + strlen(ret_type) + strlen($7->code) + 32);
         sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4->code, ret_type, $7->code);
-        $$ = mk("function", @1.first_line, buf, $4, $7, NULL);
+        $$ = mk("function", @1.first_line, buf,
+                $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), node_leaf("LPAREN", "(", @3.first_line),
+                $4, node_leaf("RPAREN", ")", @5.first_line), node_leaf("LBRACE", "{", @6.first_line),
+                $7, node_leaf("RBRACE", "}", @8.first_line), NULL);
     }
 ;
 
 opt_param_list:
     param_list {
-        $$ = $1;
+        $$ = mk("opt_param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | /* vazio */ {
         char *buf = malloc(1);
         buf[0] = '\0';
-        $$ = mk("opt_param_list", @$.first_line, buf, NULL);
+        $$ = mk("opt_param_list", @$.first_line, buf, node_leaf("ε", NULL, @$.first_line), NULL);
     }
 ;
 
 param_list:
     param {
-        $$ = $1;
+        $$ = mk("param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | param_list ',' param {
         char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
         sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("param_list", @1.first_line, buf, $1, $3, NULL);
+        $$ = mk("param_list", @1.first_line, buf, $1, node_leaf("','", ",", @2.first_line), $3, NULL);
     }
 ;
 
 param:
     type_specifier IDENTIFIER {
-        const char *t = type_to_rust($1);
+        const char *t = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
         sprintf(buf, "%s: %s", $2.s_val, t);
-        $$ = mk("param", @1.first_line, buf, NULL);
+        $$ = mk("param", @1.first_line, buf, $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), NULL);
     }
 ;
 
 type_specifier:
-    TYPE_KW { $$ = $1; }
+    TYPE_KW {
+        /* reduzido antes de declarator_list, entao ja vale pra declaracao */
+        current_decl_type = $1;
+        $$ = mk("type_specifier", @1.first_line, strdup(type_to_rust($1)),
+                node_leaf("TYPE_KW", type_to_c($1), @1.first_line), NULL);
+    }
 ;
 
 statement_list:
@@ -207,8 +214,10 @@ statement_list:
 ;
 
 statement:
-    type_specifier { current_decl_type = $1; } declarator_list SEMICOLON {
-        $$ = $3;
+    type_specifier declarator_list SEMICOLON {
+        /* forma da declaracao na arvore fica para a issue #17 */
+        node_free($1);
+        $$ = $2;
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
@@ -256,7 +265,11 @@ statement:
 /* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
 for_init:
     /* vazio */ { $$ = mk("for_init", @$.first_line, strdup(""), NULL); }
-    | type_specifier { current_decl_type = $1; } declarator_list { $$ = $3; }
+    | type_specifier declarator_list {
+        /* forma da declaracao na arvore fica para a issue #17 */
+        node_free($1);
+        $$ = $2;
+    }
     | IDENTIFIER ASSIGN expr {
         $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code), $3, NULL);
     }
