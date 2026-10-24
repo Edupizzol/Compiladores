@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include "types.h"
 #include "options.h"
+#include "ast.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -26,6 +27,19 @@ static char *format_str(const char *fmt, ...) {
     vsnprintf(buf, len + 1, fmt, args_copy);
     va_end(args_copy);
     return buf;
+}
+
+/* cria um no `label` com o trecho de Rust `code` e anexa os filhos dados
+   (lista terminada em NULL); o no passa a ser dono deles */
+static Node *mk(const char *label, int line, char *code, ...) {
+    Node *n = node_new(label, line);
+    n->code = code;
+    va_list args;
+    va_start(args, code);
+    for (Node *c; (c = va_arg(args, Node *)) != NULL; )
+        node_add_child(n, c);
+    va_end(args);
+    return n;
 }
 
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
@@ -64,11 +78,20 @@ static int is_wrapped(const char *s) {
 }
 %}
 
+/* o Node da %union precisa estar visivel em parser.tab.h (lexer e main) */
+%code requires {
+#include "ast.h"
+}
+
 %union {
     DataType data_type;
     ValueData val;
-    char *str;
+    Node *node;
 }
+
+/* @N.first_line da a linha de cada simbolo (o lexer preenche yylloc em
+   YY_USER_ACTION); yylineno na acao pode estar adiantado pelo lookahead */
+%locations
 
 /* expoe yytname pra token_name() (usado pelo modo --tokens do main.c) */
 %token-table
@@ -86,10 +109,9 @@ static int is_wrapped(const char *s) {
 %token INC DEC ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
 %token AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 
-%type <str> statement_list statement expr function_list function opt_param_list param_list param
-%type <str> declarator declarator_list for_init for_cond for_incr
-%type <str> opt_arg_list arg_list
-%type <data_type> type_specifier
+%type <node> statement_list statement expr function_list function opt_param_list param_list param
+%type <node> declarator declarator_list for_init for_cond for_incr
+%type <node> opt_arg_list arg_list type_specifier
 
 /* precedencia e associatividade de C, da menor pra maior */
 %left OR
@@ -112,149 +134,177 @@ static int is_wrapped(const char *s) {
 
 program:
     function_list {
+        parse_root = mk("program", @1.first_line, NULL, $1, NULL);
         /* o Rust so sai quando nenhuma flag de analise esta ligada
            (--tree, --dot, --symtab): a saida e a analise, nao o codigo */
-        if (emit_code) printf("%s", $1);
+        if (emit_code) printf("%s", $1->code);
     }
 ;
 
 function_list:
     function {
-        $$ = $1;
+        $$ = mk("function_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | function_list function {
-        char *buf = malloc(strlen($1) + strlen($2) + 2);
-        sprintf(buf, "%s\n%s", $1, $2);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($2->code) + 2);
+        sprintf(buf, "%s\n%s", $1->code, $2->code);
+        $$ = mk("function_list", @1.first_line, buf, $1, $2, NULL);
     }
 ;
 
 function:
     type_specifier IDENTIFIER LPAREN opt_param_list RPAREN LBRACE statement_list RBRACE {
-        const char *ret_type = type_to_rust($1);
-        char *buf = malloc(strlen($2.s_val) + strlen($4) + strlen(ret_type) + strlen($7) + 32);
-        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4, ret_type, $7);
-        $$ = buf;
+        const char *ret_type = $1->code;
+        char *buf = malloc(strlen($2.s_val) + strlen($4->code) + strlen(ret_type) + strlen($7->code) + 32);
+        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4->code, ret_type, $7->code);
+        $$ = mk("function", @1.first_line, buf,
+                $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), node_leaf("LPAREN", "(", @3.first_line),
+                $4, node_leaf("RPAREN", ")", @5.first_line), node_leaf("LBRACE", "{", @6.first_line),
+                $7, node_leaf("RBRACE", "}", @8.first_line), NULL);
     }
 ;
 
 opt_param_list:
     param_list {
-        $$ = $1;
+        $$ = mk("opt_param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | /* vazio */ {
         char *buf = malloc(1);
         buf[0] = '\0';
-        $$ = buf;
+        $$ = mk("opt_param_list", @$.first_line, buf, node_leaf("ε", NULL, @$.first_line), NULL);
     }
 ;
 
 param_list:
     param {
-        $$ = $1;
+        $$ = mk("param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | param_list ',' param {
-        char *buf = malloc(strlen($1) + strlen($3) + 3);
-        sprintf(buf, "%s, %s", $1, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
+        sprintf(buf, "%s, %s", $1->code, $3->code);
+        $$ = mk("param_list", @1.first_line, buf, $1, node_leaf("','", ",", @2.first_line), $3, NULL);
     }
 ;
 
 param:
     type_specifier IDENTIFIER {
-        const char *t = type_to_rust($1);
+        const char *t = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
         sprintf(buf, "%s: %s", $2.s_val, t);
-        $$ = buf;
+        $$ = mk("param", @1.first_line, buf, $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), NULL);
     }
 ;
 
 type_specifier:
-    TYPE_KW { $$ = $1; }
+    TYPE_KW {
+        /* reduzido antes de declarator_list, entao ja vale pra declaracao */
+        current_decl_type = $1;
+        $$ = mk("type_specifier", @1.first_line, strdup(type_to_rust($1)),
+                node_leaf("TYPE_KW", type_to_c($1), @1.first_line), NULL);
+    }
 ;
 
 statement_list:
     statement { $$ = $1; }
     | statement_list statement {
-        char *buf = malloc(strlen($1) + strlen($2) + 1);
-        sprintf(buf, "%s%s", $1, $2);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($2->code) + 1);
+        sprintf(buf, "%s%s", $1->code, $2->code);
+        $$ = mk("statement_list", @1.first_line, buf, $1, $2, NULL);
     }
 ;
 
 statement:
-    type_specifier { current_decl_type = $1; } declarator_list SEMICOLON {
-        $$ = $3;
+    type_specifier declarator_list SEMICOLON {
+        /* forma da declaracao na arvore fica para a issue #17 */
+        node_free($1);
+        $$ = $2;
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
-        char *buf = malloc(strlen($1.s_val) + strlen($3) + 32);
-        sprintf(buf, "    %s = %s;\n", $1.s_val, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
+        sprintf(buf, "    %s = %s;\n", $1.s_val, $3->code);
+        $$ = mk("statement", @1.first_line, buf, $3, NULL);
     }
     | RETURN expr SEMICOLON {
-        char *buf = malloc(strlen($2) + 32);
-        sprintf(buf, "    // return %s;\n", $2);
-        $$ = buf;
+        char *buf = malloc(strlen($2->code) + 32);
+        sprintf(buf, "    // return %s;\n", $2->code);
+        $$ = mk("statement", @1.first_line, buf, $2, NULL);
     }
     | IF LPAREN expr RPAREN statement %prec IFX {
-        $$ = format_str("    if %s {\n%s    }\n", $3, $5);
+        $$ = mk("statement", @1.first_line,
+                format_str("    if %s {\n%s    }\n", $3->code, $5->code), $3, $5, NULL);
     }
     | IF LPAREN expr RPAREN statement ELSE statement {
-        $$ = format_str("    if %s {\n%s    } else {\n%s    }\n", $3, $5, $7);
+        $$ = mk("statement", @1.first_line,
+                format_str("    if %s {\n%s    } else {\n%s    }\n", $3->code, $5->code, $7->code),
+                $3, $5, $7, NULL);
     }
     | WHILE LPAREN expr RPAREN statement {
-        $$ = format_str("    while %s {\n%s    }\n", $3, $5);
+        $$ = mk("statement", @1.first_line,
+                format_str("    while %s {\n%s    }\n", $3->code, $5->code), $3, $5, NULL);
     }
     | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
-        $$ = format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
-                         $3, $5, $9, $7);
+        $$ = mk("statement", @1.first_line,
+                format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
+                           $3->code, $5->code, $9->code, $7->code),
+                $3, $5, $7, $9, NULL);
     }
     | LBRACE statement_list RBRACE {
-        $$ = format_str("    {\n%s    }\n", $2);
+        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $2->code), $2, NULL);
     }
     | LBRACE RBRACE {
-        $$ = strdup("    {}\n");
+        $$ = mk("statement", @1.first_line, strdup("    {}\n"), NULL);
     }
     | BREAK SEMICOLON {
-        $$ = strdup("    break;\n");
+        $$ = mk("statement", @1.first_line, strdup("    break;\n"), NULL);
     }
     | CONTINUE SEMICOLON {
-        $$ = strdup("    continue;\n");
+        $$ = mk("statement", @1.first_line, strdup("    continue;\n"), NULL);
     }
 ;
 
 /* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
 for_init:
-    /* vazio */ { $$ = strdup(""); }
-    | type_specifier { current_decl_type = $1; } declarator_list { $$ = $3; }
-    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;\n", $1.s_val, $3); }
+    /* vazio */ { $$ = mk("for_init", @$.first_line, strdup(""), NULL); }
+    | type_specifier declarator_list {
+        /* forma da declaracao na arvore fica para a issue #17 */
+        node_free($1);
+        $$ = $2;
+    }
+    | IDENTIFIER ASSIGN expr {
+        $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code), $3, NULL);
+    }
 ;
 
 for_cond:
-    /* vazio */ { $$ = strdup("true"); }
+    /* vazio */ { $$ = mk("for_cond", @$.first_line, strdup("true"), NULL); }
     | expr { $$ = $1; }
 ;
 
 for_incr:
-    /* vazio */ { $$ = strdup(""); }
-    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;", $1.s_val, $3); }
+    /* vazio */ { $$ = mk("for_incr", @$.first_line, strdup(""), NULL); }
+    | IDENTIFIER ASSIGN expr {
+        $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code), $3, NULL);
+    }
 ;
 
 /* uma variavel dentro de uma declaracao, com ou sem inicializacao:
    `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
 declarator:
     IDENTIFIER {
-        $$ = format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type));
+        $$ = mk("declarator", @1.first_line,
+                format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)), NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        $$ = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3);
+        $$ = mk("declarator", @1.first_line,
+                format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
+                $3, NULL);
     }
 ;
 
 declarator_list:
     declarator { $$ = $1; }
     | declarator_list ',' declarator {
-        $$ = format_str("%s%s", $1, $3);
+        $$ = mk("declarator_list", @1.first_line, format_str("%s%s", $1->code, $3->code), $1, $3, NULL);
     }
 ;
 
@@ -262,64 +312,64 @@ expr:
     INT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
-        $$ = buf;
+        $$ = mk("expr", @1.first_line, buf, NULL);
     }
     | FLOAT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
-        $$ = buf;
+        $$ = mk("expr", @1.first_line, buf, NULL);
     }
     | IDENTIFIER {
-        $$ = strdup($1.s_val);
+        $$ = mk("expr", @1.first_line, strdup($1.s_val), NULL);
     }
     | LPAREN expr RPAREN {
-        if (is_wrapped($2)) {
+        if (is_wrapped($2->code)) {
             $$ = $2; /* ex. (a == b) ja vem entre parenteses do cmp_expr */
         } else {
-            char *buf = malloc(strlen($2) + 3);
-            sprintf(buf, "(%s)", $2);
-            $$ = buf;
+            char *buf = malloc(strlen($2->code) + 3);
+            sprintf(buf, "(%s)", $2->code);
+            $$ = mk("expr", @1.first_line, buf, $2, NULL);
         }
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
-        char *buf = malloc(strlen($1.s_val) + strlen($3) + 3);
-        sprintf(buf, "%s(%s)", $1.s_val, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
+        sprintf(buf, "%s(%s)", $1.s_val, $3->code);
+        $$ = mk("expr", @1.first_line, buf, $3, NULL);
     }
-    | expr PLUS expr    { $$ = binop_expr($1, "+", $3); }
-    | expr MINUS expr   { $$ = binop_expr($1, "-", $3); }
-    | expr STAR expr    { $$ = binop_expr($1, "*", $3); }
-    | expr SLASH expr   { $$ = binop_expr($1, "/", $3); }
-    | expr MOD expr     { $$ = binop_expr($1, "%", $3); }
-    | expr XOR expr     { $$ = binop_expr($1, "^", $3); }
-    | expr OR expr      { $$ = binop_expr($1, "||", $3); }
-    | expr BINOR expr   { $$ = binop_expr($1, "|", $3); }
-    | expr AND expr     { $$ = binop_expr($1, "&&", $3); }
-    | expr EC expr      { $$ = binop_expr($1, "&", $3); }
-    | expr SHIFTL expr  { $$ = binop_expr($1, "<<", $3); }
-    | expr SHIFTR expr  { $$ = binop_expr($1, ">>", $3); }
-    | expr COMP expr    { $$ = cmp_expr($1, "==", $3); }
-    | expr NE expr      { $$ = cmp_expr($1, "!=", $3); }
-    | expr LT expr      { $$ = cmp_expr($1, "<", $3); }
-    | expr GT expr      { $$ = cmp_expr($1, ">", $3); }
-    | expr LE expr      { $$ = cmp_expr($1, "<=", $3); }
-    | expr GE expr      { $$ = cmp_expr($1, ">=", $3); }
-    | NOT expr          { $$ = unop_expr("!", $2); }
-    | MINUS expr %prec UMINUS { $$ = unop_expr("-", $2); }
+    | expr PLUS expr    { $$ = mk("expr", @1.first_line, binop_expr($1->code, "+", $3->code), $1, $3, NULL); }
+    | expr MINUS expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "-", $3->code), $1, $3, NULL); }
+    | expr STAR expr    { $$ = mk("expr", @1.first_line, binop_expr($1->code, "*", $3->code), $1, $3, NULL); }
+    | expr SLASH expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "/", $3->code), $1, $3, NULL); }
+    | expr MOD expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "%", $3->code), $1, $3, NULL); }
+    | expr XOR expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "^", $3->code), $1, $3, NULL); }
+    | expr OR expr      { $$ = mk("expr", @1.first_line, binop_expr($1->code, "||", $3->code), $1, $3, NULL); }
+    | expr BINOR expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "|", $3->code), $1, $3, NULL); }
+    | expr AND expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "&&", $3->code), $1, $3, NULL); }
+    | expr EC expr      { $$ = mk("expr", @1.first_line, binop_expr($1->code, "&", $3->code), $1, $3, NULL); }
+    | expr SHIFTL expr  { $$ = mk("expr", @1.first_line, binop_expr($1->code, "<<", $3->code), $1, $3, NULL); }
+    | expr SHIFTR expr  { $$ = mk("expr", @1.first_line, binop_expr($1->code, ">>", $3->code), $1, $3, NULL); }
+    | expr COMP expr    { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "==", $3->code), $1, $3, NULL); }
+    | expr NE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "!=", $3->code), $1, $3, NULL); }
+    | expr LT expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "<", $3->code), $1, $3, NULL); }
+    | expr GT expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, ">", $3->code), $1, $3, NULL); }
+    | expr LE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "<=", $3->code), $1, $3, NULL); }
+    | expr GE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, ">=", $3->code), $1, $3, NULL); }
+    | NOT expr          { $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), $2, NULL); }
+    | MINUS expr %prec UMINUS { $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), $2, NULL); }
 ;
 
 /* argumentos de uma chamada: f(), f(a) ou f(a, b + 1, g(c)) */
 opt_arg_list:
     arg_list { $$ = $1; }
-    | /* vazio */ { $$ = strdup(""); }
+    | /* vazio */ { $$ = mk("opt_arg_list", @$.first_line, strdup(""), NULL); }
 ;
 
 arg_list:
     expr { $$ = $1; }
     | arg_list ',' expr {
-        char *buf = malloc(strlen($1) + strlen($3) + 3);
-        sprintf(buf, "%s, %s", $1, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
+        sprintf(buf, "%s, %s", $1->code, $3->code);
+        $$ = mk("arg_list", @1.first_line, buf, $1, $3, NULL);
     }
 ;
 
@@ -334,4 +384,4 @@ void yyerror(const char *s) {
 
 const char *token_name(int tok) {
     return yytname[YYTRANSLATE(tok)];
-}
+}

@@ -7,6 +7,10 @@
 
 /* linha onde o comentario de bloco aberto comecou, pra reportar se nao fechar */
 static int comment_start_line;
+
+/* linha de cada token pro parser (@N.first_line), ja que yylineno lido na
+   acao do bison pode estar adiantado pelo lookahead */
+#define YY_USER_ACTION yylloc.first_line = yylloc.last_line = yylineno;
 %}
 
 %option noyywrap
