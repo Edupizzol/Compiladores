@@ -171,26 +171,15 @@ int symtab_scope_count(int scope_id) {
 void symtab_foreach(void (*fn)(Symbol *sym, void *ctx), void *ctx) {
     if (!fn) return;
 
-    /* percorre todos os escopos, do mais novo pro mais antigo (o mais novo
-       e o mais interno na maior parte dos casos), e dentro de cada um os
-       simbolos na ordem de declaracao. Inclui escopos ja fechados, que e o
-       que a impressao da tabela completa (#25) precisa */
-    int n = 0;
-    for (ScopeNode *s = scope_list; s; s = s->next_all) n++;
-
-    ScopeNode **scopes = malloc(sizeof(ScopeNode *) * (n > 0 ? n : 1));
-    int i = n;
+    /* percorre todos os escopos na ordem de criacao (o global primeiro, e o
+       scope_id e crescente), e dentro de cada um os simbolos na ordem de
+       declaracao. Inclui escopos ja fechados, que e o que a impressao da
+       tabela completa (#25) precisa */
     for (ScopeNode *s = scope_list; s; s = s->next_all) {
-        scopes[--i] = s;
-    }
-    /* scopes[0] e o mais antigo, scopes[n-1] o mais novo */
-
-    for (i = n - 1; i >= 0; i--) {
-        for (Symbol *sym = scopes[i]->decl_head; sym; sym = sym->next_decl) {
+        for (Symbol *sym = s->decl_head; sym; sym = sym->next_decl) {
             fn(sym, ctx);
         }
     }
-    free(scopes);
 }
 
 void symtab_free(void) {

@@ -32,7 +32,7 @@ typedef struct Symbol {
                                    de declaração */
 } Symbol;
 
-/* Uma entrada de escopo: os símbolos declarados nele e o escopo pai. */
+/* Identificação de um escopo: o id único e a profundidade. */
 typedef struct Scope {
     int scope_id;
     int level;
@@ -67,8 +67,8 @@ int scope_current_id(void);
  * Insere um símbolo no escopo atual.
  *
  * Devolve 0 em caso de sucesso e -1 se o nome já existe no escopo atual
- * (redeclaração no mesmo escopo — não é erro). Esconder um nome de um
- * escopo externo é permitido e também devolve 0.
+ * (redeclaração no mesmo escopo). Nesse caso nada é inserido. Esconder um
+ * nome de um escopo externo é permitido e também devolve 0.
  *
  * Não imprime nada: quem chama decide a mensagem de erro (#24).
  */
@@ -89,8 +89,10 @@ Symbol *symtab_lookup_current(const char *name);
 int symtab_scope_count(int scope_id);
 
 /*
- * Percorre todos os símbolos da tabela, do escopo mais interno pro global,
- * e chama `fn` pra cada um. Serve pra imprimir a tabela completa (#25).
+ * Percorre todos os símbolos da tabela, incluindo os de escopos já fechados,
+ * e chama `fn` pra cada um. Os escopos vêm na ordem de criação (o global
+ * primeiro, depois por `scope_id` crescente) e, dentro de cada escopo, os
+ * símbolos na ordem de declaração. Serve pra imprimir a tabela completa (#25).
  */
 void symtab_foreach(void (*fn)(Symbol *sym, void *ctx), void *ctx);
 
