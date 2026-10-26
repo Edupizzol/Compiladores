@@ -95,3 +95,27 @@ void symtab_print(FILE *out, Symbol *const *syms, int n) {
     }
     free(sorted);
 }
+
+typedef struct {
+    Symbol **syms;
+    int n, cap;
+} SymArray;
+
+static void collect(Symbol *sym, void *ctx) {
+    SymArray *a = ctx;
+    if (a->n == a->cap) {
+        a->cap = a->cap ? a->cap * 2 : 16;
+        a->syms = realloc(a->syms, a->cap * sizeof(Symbol *));
+    }
+    a->syms[a->n++] = sym;
+}
+
+void symtab_dump(FILE *out) {
+    /* o symtab_foreach ja vem por escopo e, dentro dele, na ordem de
+       declaracao; o symtab_print ordena de novo por scope_id, o que nao
+       muda nada aqui (a ordenacao e estavel) */
+    SymArray a = { NULL, 0, 0 };
+    symtab_foreach(collect, &a);
+    symtab_print(out, a.syms, a.n);
+    free(a.syms);
+}

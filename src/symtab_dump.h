@@ -2,24 +2,11 @@
 #define SYMTAB_DUMP_H
 
 #include <stdio.h>
-#include "types.h"
+#include "symtab.h"
 
-/* ---- PROVISORIO ate a #21 entrar --------------------------------------
-   Copia de SymKind/Symbol exatamente como especificado na #21. Quando o
-   symtab.h real chegar, apagar este bloco e trocar por #include "symtab.h". */
-typedef enum { SYM_VAR, SYM_PARAM, SYM_FUNC } SymKind;
-
-typedef struct {
-    char *name;
-    SymKind kind;
-    DataType type;          /* tipo da variavel/parametro, ou retorno da funcao */
-    int scope_id;
-    int level;
-    int line;
-    int n_params;           /* so pra SYM_FUNC (#23) */
-    DataType *param_types;  /* so pra SYM_FUNC (#23) */
-} Symbol;
-/* ---- fim do bloco provisorio ------------------------------------------ */
+/* imprime a tabela de simbolos completa em `out` (--symtab): todos os
+   escopos, inclusive os ja fechados, no formato do symtab_print */
+void symtab_dump(FILE *out);
 
 /* imprime a tabela de simbolos em `out`, uma linha por simbolo, ordenada
    por scope_id e, dentro do mesmo escopo, pela ordem em que aparecem em

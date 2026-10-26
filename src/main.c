@@ -6,6 +6,7 @@
 #include "ast.h"
 #include "symtab.h"
 #include "semantic.h"
+#include "symtab_dump.h"
 
 int yyparse(void);
 int yylex(void);
@@ -107,17 +108,22 @@ int main(int argc, char **argv) {
 
     fclose(yyin);
 
+    /* com erro sintatico nao ha arvore nem tabela: so a mensagem do yyerror */
+    int syntax_ok = ret == 0;
+
     /* os erros semanticos saem todos juntos, em ordem de linha. Nao
        interrompem o parse, mas o programa e invalido: exit code != 0 */
     semantic_flush();
-    if (ret == 0 && semantic_errors > 0)
+    if (syntax_ok && semantic_errors > 0)
         ret = 1;
 
-    /* com erro sintatico nao ha arvore: so a mensagem do yyerror */
-    if (ret == 0 && (g_options & OPT_TREE))
+    /* a arvore e a tabela saem mesmo com erro semantico (ajuda a depurar) */
+    if (syntax_ok && (g_options & OPT_TREE))
         tree_print(parse_root, stdout);
-    if (ret == 0 && (g_options & OPT_DOT))
+    if (syntax_ok && (g_options & OPT_DOT))
         tree_to_dot(parse_root, stdout);
+    if (syntax_ok && (g_options & OPT_SYMTAB))
+        symtab_dump(stdout);
 
     node_free(parse_root);
     parser_cleanup();
