@@ -26,4 +26,15 @@ static inline const char* type_to_rust(DataType type) {
     }
 }
 
+static inline const char* type_to_c(DataType type) {
+    switch (type) {
+        case TYPE_INT:    return "int";
+        case TYPE_FLOAT:  return "float";
+        case TYPE_DOUBLE: return "double";
+        case TYPE_CHAR:   return "char";
+        case TYPE_VOID:   return "void";
+        default:          return "int";
+    }
+}
+
 #endif

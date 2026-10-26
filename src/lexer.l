@@ -119,4 +119,4 @@ ESC     \\([ntr0abfv\\'"?]|x[0-9a-fA-F]+)
 [ \t\n\r]+      /* ignora espaços (yylineno conta as linhas) */ ;
 .               { fprintf(stderr, "Erro léxico na linha %d: caractere desconhecido '%s'\n", yylineno, yytext); }
 
-%%
+%%
