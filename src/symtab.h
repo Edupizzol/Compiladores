@@ -75,6 +75,23 @@ int scope_current_id(void);
 int symtab_insert(const char *name, SymKind kind, DataType type, int line);
 
 /*
+ * Insere uma função (SYM_FUNC) no escopo global, qualquer que seja o escopo
+ * atual, com o tipo de retorno `ret` e a assinatura: `n_params` tipos em
+ * `param_types` (o array é copiado).
+ *
+ * Devolve 0 em caso de sucesso e -1 se já existe um símbolo com esse nome
+ * no global (função definida duas vezes). Nesse caso nada é inserido.
+ */
+int symtab_insert_func(const char *name, DataType ret, int n_params,
+                       const DataType *param_types, int line);
+
+/*
+ * Procura uma função no escopo global e devolve o símbolo, com a
+ * assinatura, ou NULL se não existir (ou se o nome não for uma função).
+ */
+Symbol *symtab_lookup_func(const char *name);
+
+/*
  * Procura um símbolo do escopo mais interno pro global e devolve o
  * ponteiro, ou NULL se não existir. Devolve o primeiro (mais interno).
  */
