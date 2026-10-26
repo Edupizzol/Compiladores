@@ -4,6 +4,7 @@
 
 #include "options.h"
 #include "ast.h"
+#include "symtab.h"
 
 int yyparse(void);
 int yylex(void);
@@ -84,6 +85,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* escopo global da tabela de simbolos, preenchida durante o parse */
+    symtab_init();
+
     int ret;
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
@@ -108,5 +112,6 @@ int main(int argc, char **argv) {
         tree_to_dot(parse_root, stdout);
 
     node_free(parse_root);
+    symtab_free();
     return ret;
 }

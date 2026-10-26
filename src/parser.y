@@ -6,6 +6,7 @@
 #include "types.h"
 #include "options.h"
 #include "ast.h"
+#include "symtab.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -151,6 +152,8 @@ static int is_wrapped(const char *s) {
 
 %%
 
+/* o escopo global e criado pelo symtab_init() do main, antes do parse, e
+   nao fecha (scope_exit no global nao faz nada) */
 program:
     function_list {
         parse_root = mk("program", @1.first_line, NULL, $1, NULL);
@@ -171,15 +174,20 @@ function_list:
     }
 ;
 
+/* parametros e corpo dividem o mesmo escopo (como em C): abre logo depois
+   do LPAREN e fecha depois do RBRACE. A acao do meio ocupa o $4, entao
+   opt_param_list e o $5 e statement_list o $8 */
 function:
-    type_specifier IDENTIFIER LPAREN opt_param_list RPAREN LBRACE statement_list RBRACE {
+    type_specifier IDENTIFIER LPAREN { scope_enter(); }
+    opt_param_list RPAREN LBRACE statement_list RBRACE {
+        scope_exit();
         const char *ret_type = $1->code;
-        char *buf = malloc(strlen($2.s_val) + strlen($4->code) + strlen(ret_type) + strlen($7->code) + 32);
-        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4->code, ret_type, $7->code);
+        char *buf = malloc(strlen($2.s_val) + strlen($5->code) + strlen(ret_type) + strlen($8->code) + 32);
+        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $5->code, ret_type, $8->code);
         $$ = mk("function", @1.first_line, buf,
                 $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
-                $4, tok("RPAREN", @5.first_line), tok("LBRACE", @6.first_line),
-                $7, tok("RBRACE", @8.first_line), NULL);
+                $5, tok("RPAREN", @6.first_line), tok("LBRACE", @7.first_line),
+                $8, tok("RBRACE", @9.first_line), NULL);
     }
 ;
 
@@ -207,6 +215,8 @@ param_list:
 
 param:
     type_specifier IDENTIFIER {
+        /* o type_specifier acabou de ser reduzido: current_decl_type e o tipo dele */
+        symtab_insert($2.s_val, SYM_PARAM, current_decl_type, @2.first_line);
         const char *t = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
         sprintf(buf, "%s: %s", $2.s_val, t);
@@ -272,19 +282,28 @@ statement:
                 tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, NULL);
     }
-    | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
+    /* o for tem escopo proprio, aberto antes do for_init, pra que o `i` de
+       `for (int i = 0; ...)` nao vaze pro resto da funcao. A acao do meio
+       ocupa o $3 */
+    | FOR LPAREN { scope_enter(); } for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
+        scope_exit();
         $$ = mk("statement", @1.first_line,
                 format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
-                           $3->code, $5->code, $9->code, $7->code),
-                tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $3,
-                tok("SEMICOLON", @4.first_line), $5, tok("SEMICOLON", @6.first_line), $7,
-                tok("RPAREN", @8.first_line), $9, NULL);
+                           $4->code, $6->code, $10->code, $8->code),
+                tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $4,
+                tok("SEMICOLON", @5.first_line), $6, tok("SEMICOLON", @7.first_line), $8,
+                tok("RPAREN", @9.first_line), $10, NULL);
     }
-    | LBRACE statement_list RBRACE {
-        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $2->code),
-                tok("LBRACE", @1.first_line), $2, tok("RBRACE", @3.first_line), NULL);
+    /* cada bloco abre um escopo; a acao do meio ocupa o $2 */
+    | LBRACE { scope_enter(); } statement_list RBRACE {
+        scope_exit();
+        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $3->code),
+                tok("LBRACE", @1.first_line), $3, tok("RBRACE", @4.first_line), NULL);
     }
     | LBRACE RBRACE {
+        /* bloco vazio tambem conta como escopo (sem simbolos) */
+        scope_enter();
+        scope_exit();
         $$ = mk("statement", @1.first_line, strdup("    {}\n"),
                 tok("LBRACE", @1.first_line), tok("RBRACE", @2.first_line), NULL);
     }
@@ -334,11 +353,13 @@ for_incr:
    `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
 declarator:
     IDENTIFIER {
+        symtab_insert($1.s_val, SYM_VAR, current_decl_type, @1.first_line);
         $$ = mk("declarator", @1.first_line,
                 format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
+        symtab_insert($1.s_val, SYM_VAR, current_decl_type, @1.first_line);
         $$ = mk("declarator", @1.first_line,
                 format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
