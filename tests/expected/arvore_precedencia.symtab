@@ -1,0 +1,15 @@
+ESCOPO  NÍVEL  NOME  CATEGORIA  TIPO            LINHA
+0       0      f     função     int (int, int)  4
+0       0      g     função     int (int)       8
+0       0      main  função     int (void)      12
+1       1      a     parâmetro  int             4
+1       1      b     parâmetro  int             4
+2       1      a     parâmetro  int             8
+3       1      a     variável   int             13
+3       1      b     variável   int             14
+3       1      c     variável   int             15
+3       1      p1    variável   int             16
+3       1      p2    variável   int             17
+3       1      p3    variável   int             18
+3       1      p4    variável   int             19
+3       1      p5    variável   int             20

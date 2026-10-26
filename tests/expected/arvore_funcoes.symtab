@@ -1,0 +1,8 @@
+ESCOPO  NÍVEL  NOME  CATEGORIA  TIPO            LINHA
+0       0      soma  função     int (int, int)  3
+0       0      main  função     int (void)      7
+1       1      a     parâmetro  int             3
+1       1      b     parâmetro  int             3
+2       1      x     variável   int             8
+2       1      y     variável   int             9
+2       1      z     variável   int             10
