@@ -7,6 +7,7 @@
 #include "options.h"
 #include "ast.h"
 #include "symtab.h"
+#include "semantic.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -61,6 +62,21 @@ static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_li
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
    `type_specifier` antes de reduzir declarator_list (statement e for_init) */
 static DataType current_decl_type;
+
+/* assinatura da funcao em andamento: o tipo de retorno e guardado logo
+   depois do LPAREN (antes que os params troquem o current_decl_type), e cada
+   `param` acrescenta o seu tipo. A funcao entra na tabela depois do RPAREN */
+static DataType current_func_ret;
+static DataType *current_func_params;
+static int current_func_n, current_func_cap;
+
+static void func_param_add(DataType t) {
+    if (current_func_n == current_func_cap) {
+        current_func_cap = current_func_cap ? current_func_cap * 2 : 4;
+        current_func_params = realloc(current_func_params, current_func_cap * sizeof(DataType));
+    }
+    current_func_params[current_func_n++] = t;
+}
 
 /* comparacoes saem sempre entre parenteses: em Rust elas tem precedencia
    menor que & ^ | (em C e o contrario) e nao podem ser encadeadas, entao
@@ -175,19 +191,32 @@ function_list:
 ;
 
 /* parametros e corpo dividem o mesmo escopo (como em C): abre logo depois
-   do LPAREN e fecha depois do RBRACE. A acao do meio ocupa o $4, entao
-   opt_param_list e o $5 e statement_list o $8 */
+   do LPAREN e fecha depois do RBRACE. A funcao entra no escopo global logo
+   depois do RPAREN, ja com a assinatura e antes do corpo (pra recursao).
+   As acoes do meio ocupam o $4 e o $7, entao opt_param_list e o $5 e
+   statement_list o $9 */
 function:
-    type_specifier IDENTIFIER LPAREN { scope_enter(); }
-    opt_param_list RPAREN LBRACE statement_list RBRACE {
+    type_specifier IDENTIFIER LPAREN {
+        scope_enter();
+        current_func_ret = current_decl_type;
+        current_func_n = 0;
+    }
+    opt_param_list RPAREN {
+        if (symtab_insert_func($2.s_val, current_func_ret, current_func_n,
+                               current_func_params, @2.first_line) != 0) {
+            semantic_error(@2.first_line, "função '%s' já definida (linha %d)",
+                           $2.s_val, symtab_lookup_func($2.s_val)->line);
+        }
+    }
+    LBRACE statement_list RBRACE {
         scope_exit();
         const char *ret_type = $1->code;
-        char *buf = malloc(strlen($2.s_val) + strlen($5->code) + strlen(ret_type) + strlen($8->code) + 32);
-        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $5->code, ret_type, $8->code);
+        char *buf = malloc(strlen($2.s_val) + strlen($5->code) + strlen(ret_type) + strlen($9->code) + 32);
+        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $5->code, ret_type, $9->code);
         $$ = mk("function", @1.first_line, buf,
                 $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
-                $5, tok("RPAREN", @6.first_line), tok("LBRACE", @7.first_line),
-                $8, tok("RBRACE", @9.first_line), NULL);
+                $5, tok("RPAREN", @6.first_line), tok("LBRACE", @8.first_line),
+                $9, tok("RBRACE", @10.first_line), NULL);
     }
 ;
 
@@ -216,7 +245,12 @@ param_list:
 param:
     type_specifier IDENTIFIER {
         /* o type_specifier acabou de ser reduzido: current_decl_type e o tipo dele */
-        symtab_insert($2.s_val, SYM_PARAM, current_decl_type, @2.first_line);
+        if (symtab_insert($2.s_val, SYM_PARAM, current_decl_type, @2.first_line) != 0) {
+            semantic_error(@2.first_line, "parâmetro '%s' repetido (linha %d)",
+                           $2.s_val, symtab_lookup_current($2.s_val)->line);
+        }
+        /* o repetido conta na aridade mesmo assim: f(int a, int a) recebe 2 */
+        func_param_add(current_decl_type);
         const char *t = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
         sprintf(buf, "%s: %s", $2.s_val, t);
@@ -462,6 +496,13 @@ extern char *yytext;
 
 void yyerror(const char *s) {
     fprintf(stderr, "Erro sintático na linha %d: %s (próximo a '%s')\n", yylineno, s, yytext);
+}
+
+/* libera o que o parser guarda entre as regras (chamada pelo main no fim) */
+void parser_cleanup(void) {
+    free(current_func_params);
+    current_func_params = NULL;
+    current_func_n = current_func_cap = 0;
 }
 
 const char *token_name(int tok) {

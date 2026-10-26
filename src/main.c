@@ -9,6 +9,7 @@
 int yyparse(void);
 int yylex(void);
 const char *token_name(int tok);
+void parser_cleanup(void);
 extern FILE *yyin;
 extern char *yytext;
 extern int yylineno;
@@ -112,6 +113,7 @@ int main(int argc, char **argv) {
         tree_to_dot(parse_root, stdout);
 
     node_free(parse_root);
+    parser_cleanup();
     symtab_free();
     return ret;
 }
