@@ -7,6 +7,10 @@
 
 /* linha onde o comentario de bloco aberto comecou, pra reportar se nao fechar */
 static int comment_start_line;
+
+/* linha de cada token pro parser (@N.first_line), ja que yylineno lido na
+   acao do bison pode estar adiantado pelo lookahead */
+#define YY_USER_ACTION yylloc.first_line = yylloc.last_line = yylineno;
 %}
 
 %option noyywrap
@@ -51,11 +55,11 @@ ESC     \\([ntr0abfv\\'"?]|x[0-9a-fA-F]+)
 "break"         { return BREAK; }
 "continue"      { return CONTINUE; }
 
- /* literais numericos */
-{DIGIT}+\.{DIGIT}*{EXP}?  { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-\.{DIGIT}+{EXP}?          { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-{DIGIT}+{EXP}             { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-{DIGIT}+                  { yylval.val.i_val = atoi(yytext); return INT_NUMBER; }
+ /* literais numericos: o valor vai pro codegen e o lexema (s_val) pra folha da arvore */
+{DIGIT}+\.{DIGIT}*{EXP}?  { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+\.{DIGIT}+{EXP}?          { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+{DIGIT}+{EXP}             { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+{DIGIT}+                  { yylval.val.i_val = atoi(yytext); yylval.val.s_val = strdup(yytext); return INT_NUMBER; }
 
  /* literais de char e string: guardam o texto com as aspas, que ja e valido em Rust ('\0', "a\n") */
 \'([^'\\\n]|{ESC})\'      { yylval.val.s_val = strdup(yytext); return CHAR_LITERAL; }
@@ -115,4 +119,4 @@ ESC     \\([ntr0abfv\\'"?]|x[0-9a-fA-F]+)
 [ \t\n\r]+      /* ignora espaços (yylineno conta as linhas) */ ;
 .               { fprintf(stderr, "Erro léxico na linha %d: caractere desconhecido '%s'\n", yylineno, yytext); }
 
-%%
+%%

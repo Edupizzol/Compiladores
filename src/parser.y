@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include "types.h"
 #include "options.h"
+#include "ast.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -26,6 +27,34 @@ static char *format_str(const char *fmt, ...) {
     vsnprintf(buf, len + 1, fmt, args_copy);
     va_end(args_copy);
     return buf;
+}
+
+/* cria um no `label` com o trecho de Rust `code` e anexa os filhos dados
+   (lista terminada em NULL); o no passa a ser dono deles */
+static Node *mk(const char *label, int line, char *code, ...) {
+    Node *n = node_new(label, line);
+    n->code = code;
+    va_list args;
+    va_start(args, code);
+    for (Node *c; (c = va_arg(args, Node *)) != NULL; )
+        node_add_child(n, c);
+    va_end(args);
+    return n;
+}
+
+/* folha de um token de texto fixo (pontuacao, operador, palavra reservada):
+   so o nome do token, sem lexema. Os tokens com lexema proprio (IDENTIFIER,
+   TYPE_KW, numeros) usam node_leaf direto */
+static Node *tok(const char *label, int line) {
+    return node_leaf(label, NULL, line);
+}
+
+/* no de expressao binaria `expr OP expr`: o operador vira folha do token
+   (PLUS, STAR...) entre os dois operandos. `gen` e binop_expr ou cmp_expr */
+static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs,
+                        char *(*gen)(char *, const char *, char *)) {
+    return mk("expr", lhs->line, gen(lhs->code, op, rhs->code),
+              lhs, tok(op_tok, op_line), rhs, NULL);
 }
 
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
@@ -64,11 +93,24 @@ static int is_wrapped(const char *s) {
 }
 %}
 
+/* o Node da %union precisa estar visivel em parser.tab.h (lexer e main) */
+%code requires {
+#include "ast.h"
+}
+
+/* no erro sintatico o bison descarta os nos que ja estavam na pilha: sem
+   isto eles vazariam (a arvore parcial nunca chega em parse_root) */
+%destructor { node_free($$); } <node>
+
 %union {
     DataType data_type;
     ValueData val;
-    char *str;
+    Node *node;
 }
+
+/* @N.first_line da a linha de cada simbolo (o lexer preenche yylloc em
+   YY_USER_ACTION); yylineno na acao pode estar adiantado pelo lookahead */
+%locations
 
 /* expoe yytname pra token_name() (usado pelo modo --tokens do main.c) */
 %token-table
@@ -86,10 +128,9 @@ static int is_wrapped(const char *s) {
 %token INC DEC ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
 %token AND_ASSIGN OR_ASSIGN XOR_ASSIGN SHL_ASSIGN SHR_ASSIGN
 
-%type <str> statement_list statement expr function_list function opt_param_list param_list param
-%type <str> declarator declarator_list for_init for_cond for_incr
-%type <str> opt_arg_list arg_list
-%type <data_type> type_specifier
+%type <node> statement_list statement expr function_list function opt_param_list param_list param
+%type <node> declarator declarator_list for_init for_cond for_incr
+%type <node> opt_arg_list arg_list type_specifier
 
 /* precedencia e associatividade de C, da menor pra maior */
 %left OR
@@ -112,149 +153,206 @@ static int is_wrapped(const char *s) {
 
 program:
     function_list {
+        parse_root = mk("program", @1.first_line, NULL, $1, NULL);
         /* o Rust so sai quando nenhuma flag de analise esta ligada
            (--tree, --dot, --symtab): a saida e a analise, nao o codigo */
-        if (emit_code) printf("%s", $1);
+        if (emit_code) printf("%s", $1->code);
     }
 ;
 
 function_list:
     function {
-        $$ = $1;
+        $$ = mk("function_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | function_list function {
-        char *buf = malloc(strlen($1) + strlen($2) + 2);
-        sprintf(buf, "%s\n%s", $1, $2);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($2->code) + 2);
+        sprintf(buf, "%s\n%s", $1->code, $2->code);
+        $$ = mk("function_list", @1.first_line, buf, $1, $2, NULL);
     }
 ;
 
 function:
     type_specifier IDENTIFIER LPAREN opt_param_list RPAREN LBRACE statement_list RBRACE {
-        const char *ret_type = type_to_rust($1);
-        char *buf = malloc(strlen($2.s_val) + strlen($4) + strlen(ret_type) + strlen($7) + 32);
-        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4, ret_type, $7);
-        $$ = buf;
+        const char *ret_type = $1->code;
+        char *buf = malloc(strlen($2.s_val) + strlen($4->code) + strlen(ret_type) + strlen($7->code) + 32);
+        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4->code, ret_type, $7->code);
+        $$ = mk("function", @1.first_line, buf,
+                $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
+                $4, tok("RPAREN", @5.first_line), tok("LBRACE", @6.first_line),
+                $7, tok("RBRACE", @8.first_line), NULL);
     }
 ;
 
 opt_param_list:
     param_list {
-        $$ = $1;
+        $$ = mk("opt_param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | /* vazio */ {
         char *buf = malloc(1);
         buf[0] = '\0';
-        $$ = buf;
+        $$ = mk("opt_param_list", @$.first_line, buf, node_leaf("ε", NULL, @$.first_line), NULL);
     }
 ;
 
 param_list:
     param {
-        $$ = $1;
+        $$ = mk("param_list", @1.first_line, strdup($1->code), $1, NULL);
     }
     | param_list ',' param {
-        char *buf = malloc(strlen($1) + strlen($3) + 3);
-        sprintf(buf, "%s, %s", $1, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
+        sprintf(buf, "%s, %s", $1->code, $3->code);
+        $$ = mk("param_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
 param:
     type_specifier IDENTIFIER {
-        const char *t = type_to_rust($1);
+        const char *t = $1->code;
         char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
         sprintf(buf, "%s: %s", $2.s_val, t);
-        $$ = buf;
+        $$ = mk("param", @1.first_line, buf, $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), NULL);
     }
 ;
 
 type_specifier:
-    TYPE_KW { $$ = $1; }
+    TYPE_KW {
+        /* reduzido antes de declarator_list, entao ja vale pra declaracao */
+        current_decl_type = $1;
+        $$ = mk("type_specifier", @1.first_line, strdup(type_to_rust($1)),
+                node_leaf("TYPE_KW", type_to_c($1), @1.first_line), NULL);
+    }
 ;
 
 statement_list:
-    statement { $$ = $1; }
+    statement {
+        $$ = mk("statement_list", @1.first_line, strdup($1->code), $1, NULL);
+    }
     | statement_list statement {
-        char *buf = malloc(strlen($1) + strlen($2) + 1);
-        sprintf(buf, "%s%s", $1, $2);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($2->code) + 1);
+        sprintf(buf, "%s%s", $1->code, $2->code);
+        $$ = mk("statement_list", @1.first_line, buf, $1, $2, NULL);
     }
 ;
 
 statement:
-    type_specifier { current_decl_type = $1; } declarator_list SEMICOLON {
-        $$ = $3;
+    type_specifier declarator_list SEMICOLON {
+        /* o Rust da declaracao e o dos declarators (um `let mut` por variavel) */
+        $$ = mk("statement", @1.first_line, strdup($2->code),
+                $1, $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
-        char *buf = malloc(strlen($1.s_val) + strlen($3) + 32);
-        sprintf(buf, "    %s = %s;\n", $1.s_val, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
+        sprintf(buf, "    %s = %s;\n", $1.s_val, $3->code);
+        $$ = mk("statement", @1.first_line, buf,
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line),
+                $3, tok("SEMICOLON", @4.first_line), NULL);
     }
     | RETURN expr SEMICOLON {
-        char *buf = malloc(strlen($2) + 32);
-        sprintf(buf, "    // return %s;\n", $2);
-        $$ = buf;
+        char *buf = malloc(strlen($2->code) + 32);
+        sprintf(buf, "    // return %s;\n", $2->code);
+        $$ = mk("statement", @1.first_line, buf,
+                tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IF LPAREN expr RPAREN statement %prec IFX {
-        $$ = format_str("    if %s {\n%s    }\n", $3, $5);
+        $$ = mk("statement", @1.first_line,
+                format_str("    if %s {\n%s    }\n", $3->code, $5->code),
+                tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, NULL);
     }
     | IF LPAREN expr RPAREN statement ELSE statement {
-        $$ = format_str("    if %s {\n%s    } else {\n%s    }\n", $3, $5, $7);
+        /* o ELSE fica no mesmo no do IF mais proximo (dangling-else) */
+        $$ = mk("statement", @1.first_line,
+                format_str("    if %s {\n%s    } else {\n%s    }\n", $3->code, $5->code, $7->code),
+                tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, tok("ELSE", @6.first_line), $7, NULL);
     }
     | WHILE LPAREN expr RPAREN statement {
-        $$ = format_str("    while %s {\n%s    }\n", $3, $5);
+        $$ = mk("statement", @1.first_line,
+                format_str("    while %s {\n%s    }\n", $3->code, $5->code),
+                tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, NULL);
     }
     | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
-        $$ = format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
-                         $3, $5, $9, $7);
+        $$ = mk("statement", @1.first_line,
+                format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
+                           $3->code, $5->code, $9->code, $7->code),
+                tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("SEMICOLON", @4.first_line), $5, tok("SEMICOLON", @6.first_line), $7,
+                tok("RPAREN", @8.first_line), $9, NULL);
     }
     | LBRACE statement_list RBRACE {
-        $$ = format_str("    {\n%s    }\n", $2);
+        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $2->code),
+                tok("LBRACE", @1.first_line), $2, tok("RBRACE", @3.first_line), NULL);
     }
     | LBRACE RBRACE {
-        $$ = strdup("    {}\n");
+        $$ = mk("statement", @1.first_line, strdup("    {}\n"),
+                tok("LBRACE", @1.first_line), tok("RBRACE", @2.first_line), NULL);
     }
     | BREAK SEMICOLON {
-        $$ = strdup("    break;\n");
+        $$ = mk("statement", @1.first_line, strdup("    break;\n"),
+                tok("BREAK", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
     | CONTINUE SEMICOLON {
-        $$ = strdup("    continue;\n");
+        $$ = mk("statement", @1.first_line, strdup("    continue;\n"),
+                tok("CONTINUE", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
 ;
 
-/* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
+/* as tres secoes do for, cada uma opcional: for (init; cond; incr).
+   Secao vazia vira o no da secao com um filho ε */
 for_init:
-    /* vazio */ { $$ = strdup(""); }
-    | type_specifier { current_decl_type = $1; } declarator_list { $$ = $3; }
-    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;\n", $1.s_val, $3); }
+    /* vazio */ {
+        $$ = mk("for_init", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
+    | type_specifier declarator_list {
+        $$ = mk("for_init", @1.first_line, strdup($2->code), $1, $2, NULL);
+    }
+    | IDENTIFIER ASSIGN expr {
+        $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
+    }
 ;
 
 for_cond:
-    /* vazio */ { $$ = strdup("true"); }
-    | expr { $$ = $1; }
+    /* vazio */ {
+        $$ = mk("for_cond", @$.first_line, strdup("true"), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
+    | expr { $$ = mk("for_cond", @1.first_line, strdup($1->code), $1, NULL); }
 ;
 
 for_incr:
-    /* vazio */ { $$ = strdup(""); }
-    | IDENTIFIER ASSIGN expr { $$ = format_str("%s = %s;", $1.s_val, $3); }
+    /* vazio */ {
+        $$ = mk("for_incr", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
+    | IDENTIFIER ASSIGN expr {
+        $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
+    }
 ;
 
 /* uma variavel dentro de uma declaracao, com ou sem inicializacao:
    `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
 declarator:
     IDENTIFIER {
-        $$ = format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type));
+        $$ = mk("declarator", @1.first_line,
+                format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        $$ = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3);
+        $$ = mk("declarator", @1.first_line,
+                format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
 
+/* recursiva a esquerda: `int a, b, c;` fica aninhada, sem achatar */
 declarator_list:
-    declarator { $$ = $1; }
+    declarator {
+        $$ = mk("declarator_list", @1.first_line, strdup($1->code), $1, NULL);
+    }
     | declarator_list ',' declarator {
-        $$ = format_str("%s%s", $1, $3);
+        $$ = mk("declarator_list", @1.first_line, format_str("%s%s", $1->code, $3->code),
+                $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
@@ -262,64 +360,77 @@ expr:
     INT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
-        $$ = buf;
+        $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | FLOAT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
-        $$ = buf;
+        $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | IDENTIFIER {
-        $$ = strdup($1.s_val);
+        $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | LPAREN expr RPAREN {
-        if (is_wrapped($2)) {
-            $$ = $2; /* ex. (a == b) ja vem entre parenteses do cmp_expr */
+        char *buf;
+        if (is_wrapped($2->code)) {
+            buf = strdup($2->code); /* ex. (a == b) ja vem entre parenteses do cmp_expr */
         } else {
-            char *buf = malloc(strlen($2) + 3);
-            sprintf(buf, "(%s)", $2);
-            $$ = buf;
+            buf = malloc(strlen($2->code) + 3);
+            sprintf(buf, "(%s)", $2->code);
         }
+        /* a arvore guarda os parenteses como estao no fonte, independente do codegen */
+        $$ = mk("expr", @1.first_line, buf,
+                tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
-        char *buf = malloc(strlen($1.s_val) + strlen($3) + 3);
-        sprintf(buf, "%s(%s)", $1.s_val, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
+        sprintf(buf, "%s(%s)", $1.s_val, $3->code);
+        $$ = mk("expr", @1.first_line, buf,
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("LPAREN", @2.first_line),
+                $3, tok("RPAREN", @4.first_line), NULL);
     }
-    | expr PLUS expr    { $$ = binop_expr($1, "+", $3); }
-    | expr MINUS expr   { $$ = binop_expr($1, "-", $3); }
-    | expr STAR expr    { $$ = binop_expr($1, "*", $3); }
-    | expr SLASH expr   { $$ = binop_expr($1, "/", $3); }
-    | expr MOD expr     { $$ = binop_expr($1, "%", $3); }
-    | expr XOR expr     { $$ = binop_expr($1, "^", $3); }
-    | expr OR expr      { $$ = binop_expr($1, "||", $3); }
-    | expr BINOR expr   { $$ = binop_expr($1, "|", $3); }
-    | expr AND expr     { $$ = binop_expr($1, "&&", $3); }
-    | expr EC expr      { $$ = binop_expr($1, "&", $3); }
-    | expr SHIFTL expr  { $$ = binop_expr($1, "<<", $3); }
-    | expr SHIFTR expr  { $$ = binop_expr($1, ">>", $3); }
-    | expr COMP expr    { $$ = cmp_expr($1, "==", $3); }
-    | expr NE expr      { $$ = cmp_expr($1, "!=", $3); }
-    | expr LT expr      { $$ = cmp_expr($1, "<", $3); }
-    | expr GT expr      { $$ = cmp_expr($1, ">", $3); }
-    | expr LE expr      { $$ = cmp_expr($1, "<=", $3); }
-    | expr GE expr      { $$ = cmp_expr($1, ">=", $3); }
-    | NOT expr          { $$ = unop_expr("!", $2); }
-    | MINUS expr %prec UMINUS { $$ = unop_expr("-", $2); }
+    | expr PLUS expr    { $$ = binop_node($1, "PLUS", "+", @2.first_line, $3, binop_expr); }
+    | expr MINUS expr   { $$ = binop_node($1, "MINUS", "-", @2.first_line, $3, binop_expr); }
+    | expr STAR expr    { $$ = binop_node($1, "STAR", "*", @2.first_line, $3, binop_expr); }
+    | expr SLASH expr   { $$ = binop_node($1, "SLASH", "/", @2.first_line, $3, binop_expr); }
+    | expr MOD expr     { $$ = binop_node($1, "MOD", "%", @2.first_line, $3, binop_expr); }
+    | expr XOR expr     { $$ = binop_node($1, "XOR", "^", @2.first_line, $3, binop_expr); }
+    | expr OR expr      { $$ = binop_node($1, "OR", "||", @2.first_line, $3, binop_expr); }
+    | expr BINOR expr   { $$ = binop_node($1, "BINOR", "|", @2.first_line, $3, binop_expr); }
+    | expr AND expr     { $$ = binop_node($1, "AND", "&&", @2.first_line, $3, binop_expr); }
+    | expr EC expr      { $$ = binop_node($1, "EC", "&", @2.first_line, $3, binop_expr); }
+    | expr SHIFTL expr  { $$ = binop_node($1, "SHIFTL", "<<", @2.first_line, $3, binop_expr); }
+    | expr SHIFTR expr  { $$ = binop_node($1, "SHIFTR", ">>", @2.first_line, $3, binop_expr); }
+    | expr COMP expr    { $$ = binop_node($1, "COMP", "==", @2.first_line, $3, cmp_expr); }
+    | expr NE expr      { $$ = binop_node($1, "NE", "!=", @2.first_line, $3, cmp_expr); }
+    | expr LT expr      { $$ = binop_node($1, "LT", "<", @2.first_line, $3, cmp_expr); }
+    | expr GT expr      { $$ = binop_node($1, "GT", ">", @2.first_line, $3, cmp_expr); }
+    | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, cmp_expr); }
+    | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, cmp_expr); }
+    | NOT expr {
+        $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
+    }
+    | MINUS expr %prec UMINUS {
+        $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), tok("MINUS", @1.first_line), $2, NULL);
+    }
 ;
 
 /* argumentos de uma chamada: f(), f(a) ou f(a, b + 1, g(c)) */
 opt_arg_list:
-    arg_list { $$ = $1; }
-    | /* vazio */ { $$ = strdup(""); }
+    arg_list { $$ = mk("opt_arg_list", @1.first_line, strdup($1->code), $1, NULL); }
+    | /* vazio */ {
+        $$ = mk("opt_arg_list", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
 ;
 
 arg_list:
-    expr { $$ = $1; }
+    expr { $$ = mk("arg_list", @1.first_line, strdup($1->code), $1, NULL); }
     | arg_list ',' expr {
-        char *buf = malloc(strlen($1) + strlen($3) + 3);
-        sprintf(buf, "%s, %s", $1, $3);
-        $$ = buf;
+        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
+        sprintf(buf, "%s, %s", $1->code, $3->code);
+        $$ = mk("arg_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
@@ -334,4 +445,4 @@ void yyerror(const char *s) {
 
 const char *token_name(int tok) {
     return yytname[YYTRANSLATE(tok)];
-}
+}
