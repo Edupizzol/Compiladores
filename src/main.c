@@ -5,6 +5,7 @@
 #include "options.h"
 #include "ast.h"
 #include "symtab.h"
+#include "semantic.h"
 
 int yyparse(void);
 int yylex(void);
@@ -105,6 +106,12 @@ int main(int argc, char **argv) {
     }
 
     fclose(yyin);
+
+    /* os erros semanticos saem todos juntos, em ordem de linha. Nao
+       interrompem o parse, mas o programa e invalido: exit code != 0 */
+    semantic_flush();
+    if (ret == 0 && semantic_errors > 0)
+        ret = 1;
 
     /* com erro sintatico nao ha arvore: so a mensagem do yyerror */
     if (ret == 0 && (g_options & OPT_TREE))

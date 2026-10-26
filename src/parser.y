@@ -70,6 +70,37 @@ static DataType current_func_ret;
 static DataType *current_func_params;
 static int current_func_n, current_func_cap;
 
+/* uso de `name` como variavel (em expressao ou como alvo de atribuicao):
+   tem que haver uma variavel ou parametro visivel com esse nome */
+static void check_var_use(const char *name, int line) {
+    Symbol *sym = symtab_lookup(name);
+    if (!sym)
+        semantic_error(line, "variável '%s' não declarada", name);
+    else if (sym->kind == SYM_FUNC)
+        semantic_error(line, "'%s' é uma função, não uma variável", name);
+}
+
+/* quantos argumentos tem um opt_arg_list: o vazio tem so o filho ε, e o
+   arg_list aninha a esquerda (arg_list ',' expr) */
+static int count_args(const Node *opt_arg_list) {
+    const Node *list = opt_arg_list->children[0];
+    if (strcmp(list->label, "arg_list") != 0) return 0;
+    int n = 1;
+    while (list->n_children == 3) {
+        n++;
+        list = list->children[0];
+    }
+    return n;
+}
+
+/* declaracao de variavel: redeclarar no mesmo escopo e erro, mas esconder
+   um nome de um escopo externo (sombreamento) e valido */
+static void declare_var(const char *name, int line) {
+    if (symtab_insert(name, SYM_VAR, current_decl_type, line) != 0)
+        semantic_error(line, "variável '%s' já declarada neste escopo (linha %d)",
+                       name, symtab_lookup_current(name)->line);
+}
+
 static void func_param_add(DataType t) {
     if (current_func_n == current_func_cap) {
         current_func_cap = current_func_cap ? current_func_cap * 2 : 4;
@@ -173,9 +204,12 @@ static int is_wrapped(const char *s) {
 program:
     function_list {
         parse_root = mk("program", @1.first_line, NULL, $1, NULL);
+        /* com o programa inteiro lido, todas as funcoes ja estao na tabela */
+        semantic_check_calls();
         /* o Rust so sai quando nenhuma flag de analise esta ligada
-           (--tree, --dot, --symtab): a saida e a analise, nao o codigo */
-        if (emit_code) printf("%s", $1->code);
+           (--tree, --dot, --symtab): a saida e a analise, nao o codigo.
+           Programa com erro semantico e invalido e tambem nao gera Rust */
+        if (emit_code && semantic_errors == 0) printf("%s", $1->code);
     }
 ;
 
@@ -285,6 +319,7 @@ statement:
                 $1, $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
+        check_var_use($1.s_val, @1.first_line);
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
         sprintf(buf, "    %s = %s;\n", $1.s_val, $3->code);
         $$ = mk("statement", @1.first_line, buf,
@@ -361,6 +396,7 @@ for_init:
         $$ = mk("for_init", @1.first_line, strdup($2->code), $1, $2, NULL);
     }
     | IDENTIFIER ASSIGN expr {
+        check_var_use($1.s_val, @1.first_line);
         $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
@@ -378,6 +414,7 @@ for_incr:
         $$ = mk("for_incr", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
+        check_var_use($1.s_val, @1.first_line);
         $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
@@ -387,13 +424,13 @@ for_incr:
    `int x;` ou `int x = 5;` (usa current_decl_type pro tipo) */
 declarator:
     IDENTIFIER {
-        symtab_insert($1.s_val, SYM_VAR, current_decl_type, @1.first_line);
+        declare_var($1.s_val, @1.first_line);
         $$ = mk("declarator", @1.first_line,
                 format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        symtab_insert($1.s_val, SYM_VAR, current_decl_type, @1.first_line);
+        declare_var($1.s_val, @1.first_line);
         $$ = mk("declarator", @1.first_line,
                 format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
@@ -425,6 +462,7 @@ expr:
         free($1.s_val);
     }
     | IDENTIFIER {
+        check_var_use($1.s_val, @1.first_line);
         $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | LPAREN expr RPAREN {
@@ -440,6 +478,8 @@ expr:
                 tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
+        /* checada so no fim do programa: a funcao pode vir depois */
+        semantic_call($1.s_val, count_args($3), @1.first_line);
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
         sprintf(buf, "%s(%s)", $1.s_val, $3->code);
         $$ = mk("expr", @1.first_line, buf,
