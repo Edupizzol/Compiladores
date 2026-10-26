@@ -4,10 +4,16 @@
 
 #include "options.h"
 #include "ast.h"
+#include "symtab.h"
+#include "semantic.h"
+#include "symtab_dump.h"
 
 int yyparse(void);
 int yylex(void);
 const char *token_name(int tok);
+void parser_cleanup(void);
+void lexer_free_strings(void);
+extern int lexical_errors;
 extern FILE *yyin;
 extern char *yytext;
 extern int yylineno;
@@ -84,6 +90,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* escopo global da tabela de simbolos, preenchida durante o parse */
+    symtab_init();
+
     int ret;
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
@@ -100,6 +109,30 @@ int main(int argc, char **argv) {
     }
 
     fclose(yyin);
+
+    /* com erro sintatico nao ha arvore nem tabela: so a mensagem do yyerror */
+    int syntax_ok = ret == 0;
+
+    /* os erros semanticos saem todos juntos, em ordem de linha. Nao
+       interrompem o parse, mas o programa e invalido: exit code != 0 */
+    semantic_flush();
+    if (syntax_ok && semantic_errors > 0)
+        ret = 1;
+    /* erro lexico tambem invalida o programa, mesmo no --tokens */
+    if (lexical_errors > 0)
+        ret = 1;
+
+    /* a arvore e a tabela saem mesmo com erro semantico (ajuda a depurar) */
+    if (syntax_ok && (g_options & OPT_TREE))
+        tree_print(parse_root, stdout);
+    if (syntax_ok && (g_options & OPT_DOT))
+        tree_to_dot(parse_root, stdout);
+    if (syntax_ok && (g_options & OPT_SYMTAB))
+        symtab_dump(stdout);
+
     node_free(parse_root);
+    parser_cleanup();
+    symtab_free();
+    lexer_free_strings();
     return ret;
 }

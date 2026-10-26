@@ -1,0 +1,93 @@
+program
+└── function_list
+    ├── function_list
+    │   └── function
+    │       ├── type_specifier
+    │       │   └── TYPE_KW (int)
+    │       ├── IDENTIFIER (soma)
+    │       ├── LPAREN
+    │       ├── opt_param_list
+    │       │   └── param_list
+    │       │       ├── param_list
+    │       │       │   └── param
+    │       │       │       ├── type_specifier
+    │       │       │       │   └── TYPE_KW (int)
+    │       │       │       └── IDENTIFIER (a)
+    │       │       ├── ','
+    │       │       └── param
+    │       │           ├── type_specifier
+    │       │           │   └── TYPE_KW (int)
+    │       │           └── IDENTIFIER (b)
+    │       ├── RPAREN
+    │       ├── LBRACE
+    │       ├── statement_list
+    │       │   ├── statement_list
+    │       │   │   └── statement
+    │       │   │       ├── type_specifier
+    │       │   │       │   └── TYPE_KW (int)
+    │       │   │       ├── declarator_list
+    │       │   │       │   └── declarator
+    │       │   │       │       ├── IDENTIFIER (res)
+    │       │   │       │       ├── ASSIGN
+    │       │   │       │       └── expr
+    │       │   │       │           ├── expr
+    │       │   │       │           │   └── IDENTIFIER (a)
+    │       │   │       │           ├── PLUS
+    │       │   │       │           └── expr
+    │       │   │       │               └── IDENTIFIER (b)
+    │       │   │       └── SEMICOLON
+    │       │   └── statement
+    │       │       ├── RETURN
+    │       │       ├── expr
+    │       │       │   └── IDENTIFIER (res)
+    │       │       └── SEMICOLON
+    │       └── RBRACE
+    └── function
+        ├── type_specifier
+        │   └── TYPE_KW (int)
+        ├── IDENTIFIER (main)
+        ├── LPAREN
+        ├── opt_param_list
+        │   └── ε
+        ├── RPAREN
+        ├── LBRACE
+        ├── statement_list
+        │   ├── statement_list
+        │   │   ├── statement_list
+        │   │   │   ├── statement_list
+        │   │   │   │   └── statement
+        │   │   │   │       ├── type_specifier
+        │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │       ├── declarator_list
+        │   │   │   │       │   └── declarator
+        │   │   │   │       │       ├── IDENTIFIER (x)
+        │   │   │   │       │       ├── ASSIGN
+        │   │   │   │       │       └── expr
+        │   │   │   │       │           └── INT_NUMBER (10)
+        │   │   │   │       └── SEMICOLON
+        │   │   │   └── statement
+        │   │   │       ├── type_specifier
+        │   │   │       │   └── TYPE_KW (int)
+        │   │   │       ├── declarator_list
+        │   │   │       │   └── declarator
+        │   │   │       │       ├── IDENTIFIER (y)
+        │   │   │       │       ├── ASSIGN
+        │   │   │       │       └── expr
+        │   │   │       │           └── INT_NUMBER (20)
+        │   │   │       └── SEMICOLON
+        │   │   └── statement
+        │   │       ├── type_specifier
+        │   │       │   └── TYPE_KW (int)
+        │   │       ├── declarator_list
+        │   │       │   └── declarator
+        │   │       │       ├── IDENTIFIER (total)
+        │   │       │       ├── ASSIGN
+        │   │       │       └── expr
+        │   │       │           └── INT_NUMBER (0)
+        │   │       └── SEMICOLON
+        │   └── statement
+        │       ├── RETURN
+        │       ├── expr
+        │       │   └── IDENTIFIER (total)
+        │       └── SEMICOLON
+        └── RBRACE

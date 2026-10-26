@@ -1,0 +1,11 @@
+ESCOPO  NÍVEL  NOME      CATEGORIA  TIPO                     LINHA
+0       0      fatorial  função     int (int)                3
+0       0      main      função     int (void)               9
+0       0      media     função     double (double, double)  15
+0       0      nada      função     void (void)              19
+1       1      n         parâmetro  int                      3
+2       1      r         variável   int                      10
+2       1      m         variável   double                   11
+3       1      a         parâmetro  double                   15
+3       1      b         parâmetro  double                   15
+4       1      vazio     variável   int                      20

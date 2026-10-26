@@ -103,16 +103,24 @@ int scope_current_id(void) {
     return scope_stack ? scope_stack->scope.scope_id : 0;
 }
 
-int symtab_insert(const char *name, SymKind kind, DataType type, int line) {
-    /* ja existe no escopo atual? ai e falha, sem imprimir nada */
-    if (symtab_lookup_current(name)) return -1;
+/* procura `name` so no escopo de id `scope_id` */
+static Symbol *lookup_in(const char *name, int scope_id) {
+    if (!name) return NULL;
+    for (Symbol *sym = table[hash_name(name)]; sym; sym = sym->next) {
+        if (sym->scope_id != scope_id) continue;
+        if (strcmp(sym->name, name) == 0) return sym;
+    }
+    return NULL;
+}
 
+/* cria o simbolo e o poe na hash e na lista de declaracao de `scope` */
+static Symbol *insert_in(ScopeNode *scope, const char *name, SymKind kind, DataType type, int line) {
     Symbol *sym = calloc(1, sizeof(Symbol));
     sym->name = strdup(name);
     sym->kind = kind;
     sym->type = type;
-    sym->scope_id = scope_current_id();
-    sym->level = scope_level();
+    sym->scope_id = scope->scope.scope_id;
+    sym->level = scope->scope.level;
     sym->line = line;
     sym->n_params = 0;
     sym->param_types = NULL;
@@ -124,14 +132,38 @@ int symtab_insert(const char *name, SymKind kind, DataType type, int line) {
     table[h] = sym;
 
     /* lista de declaracao do escopo, pra impressao estavel */
-    ScopeNode *scope = scope_stack;
-    if (scope) {
-        if (scope->decl_tail) scope->decl_tail->next_decl = sym;
-        else scope->decl_head = sym;
-        scope->decl_tail = sym;
-    }
+    if (scope->decl_tail) scope->decl_tail->next_decl = sym;
+    else scope->decl_head = sym;
+    scope->decl_tail = sym;
 
+    return sym;
+}
+
+int symtab_insert(const char *name, SymKind kind, DataType type, int line) {
+    /* ja existe no escopo atual? ai e falha, sem imprimir nada */
+    if (symtab_lookup_current(name)) return -1;
+
+    insert_in(scope_stack, name, kind, type, line);
     return 0;
+}
+
+int symtab_insert_func(const char *name, DataType ret, int n_params,
+                       const DataType *param_types, int line) {
+    /* o global e sempre o primeiro da lista de escopos (id 0) */
+    if (lookup_in(name, 0)) return -1;
+
+    Symbol *sym = insert_in(scope_list, name, SYM_FUNC, ret, line);
+    sym->n_params = n_params;
+    if (n_params > 0) {
+        sym->param_types = malloc(n_params * sizeof(DataType));
+        memcpy(sym->param_types, param_types, n_params * sizeof(DataType));
+    }
+    return 0;
+}
+
+Symbol *symtab_lookup_func(const char *name) {
+    Symbol *sym = lookup_in(name, 0);
+    return sym && sym->kind == SYM_FUNC ? sym : NULL;
 }
 
 Symbol *symtab_lookup(const char *name) {
@@ -148,14 +180,7 @@ Symbol *symtab_lookup(const char *name) {
 }
 
 Symbol *symtab_lookup_current(const char *name) {
-    if (!name) return NULL;
-
-    int current_id = scope_current_id();
-    for (Symbol *sym = table[hash_name(name)]; sym; sym = sym->next) {
-        if (sym->scope_id != current_id) continue;
-        if (strcmp(sym->name, name) == 0) return sym;
-    }
-    return NULL;
+    return lookup_in(name, scope_current_id());
 }
 
 int symtab_scope_count(int scope_id) {

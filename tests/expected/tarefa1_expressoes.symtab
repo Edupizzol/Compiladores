@@ -1,0 +1,27 @@
+ESCOPO  NÍVEL  NOME   CATEGORIA  TIPO                     LINHA
+0       0      zero   função     int (void)               3
+0       0      soma   função     int (int, int)           7
+0       0      media  função     double (double, double)  11
+0       0      main   função     int (void)               15
+2       1      a      parâmetro  int                      7
+2       1      b      parâmetro  int                      7
+3       1      x      parâmetro  double                   11
+3       1      y      parâmetro  double                   11
+4       1      a      variável   int                      16
+4       1      b      variável   int                      17
+4       1      r1     variável   int                      20
+4       1      r2     variável   int                      21
+4       1      r3     variável   int                      22
+4       1      r4     variável   int                      25
+4       1      r5     variável   int                      26
+4       1      r6     variável   int                      27
+4       1      r7     variável   int                      30
+4       1      r8     variável   int                      31
+4       1      r9     variável   int                      34
+4       1      r10    variável   int                      37
+4       1      r11    variável   int                      38
+4       1      r12    variável   int                      39
+4       1      c1     variável   int                      42
+4       1      c2     variável   int                      43
+4       1      c3     variável   int                      44
+4       1      m      variável   double                   45

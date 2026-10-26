@@ -1,0 +1,8 @@
+ESCOPO  NÍVEL  NOME   CATEGORIA  TIPO        LINHA
+0       0      main   função     int (void)  1
+1       1      i      variável   int         2
+1       1      a      variável   int         3
+1       1      b      variável   int         3
+1       1      c      variável   int         3
+1       1      total  variável   int         4
+5       2      j      variável   int         26

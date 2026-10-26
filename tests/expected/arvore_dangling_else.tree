@@ -1,0 +1,77 @@
+program
+└── function_list
+    └── function
+        ├── type_specifier
+        │   └── TYPE_KW (int)
+        ├── IDENTIFIER (main)
+        ├── LPAREN
+        ├── opt_param_list
+        │   └── ε
+        ├── RPAREN
+        ├── LBRACE
+        ├── statement_list
+        │   ├── statement_list
+        │   │   ├── statement_list
+        │   │   │   ├── statement_list
+        │   │   │   │   ├── statement_list
+        │   │   │   │   │   └── statement
+        │   │   │   │   │       ├── type_specifier
+        │   │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │   │       ├── declarator_list
+        │   │   │   │   │       │   └── declarator
+        │   │   │   │   │       │       ├── IDENTIFIER (a)
+        │   │   │   │   │       │       ├── ASSIGN
+        │   │   │   │   │       │       └── expr
+        │   │   │   │   │       │           └── INT_NUMBER (1)
+        │   │   │   │   │       └── SEMICOLON
+        │   │   │   │   └── statement
+        │   │   │   │       ├── type_specifier
+        │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │       ├── declarator_list
+        │   │   │   │       │   └── declarator
+        │   │   │   │       │       ├── IDENTIFIER (b)
+        │   │   │   │       │       ├── ASSIGN
+        │   │   │   │       │       └── expr
+        │   │   │   │       │           └── INT_NUMBER (1)
+        │   │   │   │       └── SEMICOLON
+        │   │   │   └── statement
+        │   │   │       ├── type_specifier
+        │   │   │       │   └── TYPE_KW (int)
+        │   │   │       ├── declarator_list
+        │   │   │       │   └── declarator
+        │   │   │       │       ├── IDENTIFIER (x)
+        │   │   │       │       ├── ASSIGN
+        │   │   │       │       └── expr
+        │   │   │       │           └── INT_NUMBER (0)
+        │   │   │       └── SEMICOLON
+        │   │   └── statement
+        │   │       ├── IF
+        │   │       ├── LPAREN
+        │   │       ├── expr
+        │   │       │   └── IDENTIFIER (a)
+        │   │       ├── RPAREN
+        │   │       └── statement
+        │   │           ├── IF
+        │   │           ├── LPAREN
+        │   │           ├── expr
+        │   │           │   └── IDENTIFIER (b)
+        │   │           ├── RPAREN
+        │   │           ├── statement
+        │   │           │   ├── IDENTIFIER (x)
+        │   │           │   ├── ASSIGN
+        │   │           │   ├── expr
+        │   │           │   │   └── INT_NUMBER (1)
+        │   │           │   └── SEMICOLON
+        │   │           ├── ELSE
+        │   │           └── statement
+        │   │               ├── IDENTIFIER (x)
+        │   │               ├── ASSIGN
+        │   │               ├── expr
+        │   │               │   └── INT_NUMBER (2)
+        │   │               └── SEMICOLON
+        │   └── statement
+        │       ├── RETURN
+        │       ├── expr
+        │       │   └── IDENTIFIER (x)
+        │       └── SEMICOLON
+        └── RBRACE

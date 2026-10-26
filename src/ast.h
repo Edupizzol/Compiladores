@@ -1,6 +1,8 @@
 #ifndef AST_H
 #define AST_H
 
+#include <stdio.h>
+
 /* No da arvore de derivacao. Cada regra do parser cria um no; o `code`
    guarda o trecho de Rust ja gerado para aquele no (o codegen atual ainda
    e dirigido pela sintaxe, entao ele continua vivendo aqui). */
@@ -30,5 +32,14 @@ void node_add_child(Node *parent, Node *child);
 /* libera o no, o text, o code e todos os descendentes (recursivo).
    Aceita NULL. */
 void node_free(Node *root);
+
+/* imprime a arvore em texto, um no por linha, com os ramos em ASCII
+   (├── └── │). Folha com lexema sai como `IDENTIFIER (x)`. */
+void tree_print(const Node *root, FILE *out);
+
+/* exporta a arvore em Graphviz: um `digraph` com um no por entrada da
+   arvore, folhas com shape=box e nao-terminais com shape=ellipse. Os ids
+   sao n0, n1, ... na ordem da travessia (o rotulo nao serve de id). */
+void tree_to_dot(const Node *root, FILE *out);
 
 #endif
