@@ -220,7 +220,9 @@ type_specifier:
 ;
 
 statement_list:
-    statement { $$ = $1; }
+    statement {
+        $$ = mk("statement_list", @1.first_line, strdup($1->code), $1, NULL);
+    }
     | statement_list statement {
         char *buf = malloc(strlen($1->code) + strlen($2->code) + 1);
         sprintf(buf, "%s%s", $1->code, $2->code);
@@ -230,75 +232,97 @@ statement_list:
 
 statement:
     type_specifier declarator_list SEMICOLON {
-        /* forma da declaracao na arvore fica para a issue #17 */
-        node_free($1);
-        $$ = $2;
+        /* o Rust da declaracao e o dos declarators (um `let mut` por variavel) */
+        $$ = mk("statement", @1.first_line, strdup($2->code),
+                $1, $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
         sprintf(buf, "    %s = %s;\n", $1.s_val, $3->code);
-        $$ = mk("statement", @1.first_line, buf, $3, NULL);
+        $$ = mk("statement", @1.first_line, buf,
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line),
+                $3, tok("SEMICOLON", @4.first_line), NULL);
     }
     | RETURN expr SEMICOLON {
         char *buf = malloc(strlen($2->code) + 32);
         sprintf(buf, "    // return %s;\n", $2->code);
-        $$ = mk("statement", @1.first_line, buf, $2, NULL);
+        $$ = mk("statement", @1.first_line, buf,
+                tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IF LPAREN expr RPAREN statement %prec IFX {
         $$ = mk("statement", @1.first_line,
-                format_str("    if %s {\n%s    }\n", $3->code, $5->code), $3, $5, NULL);
+                format_str("    if %s {\n%s    }\n", $3->code, $5->code),
+                tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, NULL);
     }
     | IF LPAREN expr RPAREN statement ELSE statement {
+        /* o ELSE fica no mesmo no do IF mais proximo (dangling-else) */
         $$ = mk("statement", @1.first_line,
                 format_str("    if %s {\n%s    } else {\n%s    }\n", $3->code, $5->code, $7->code),
-                $3, $5, $7, NULL);
+                tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, tok("ELSE", @6.first_line), $7, NULL);
     }
     | WHILE LPAREN expr RPAREN statement {
         $$ = mk("statement", @1.first_line,
-                format_str("    while %s {\n%s    }\n", $3->code, $5->code), $3, $5, NULL);
+                format_str("    while %s {\n%s    }\n", $3->code, $5->code),
+                tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("RPAREN", @4.first_line), $5, NULL);
     }
     | FOR LPAREN for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
         $$ = mk("statement", @1.first_line,
                 format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
                            $3->code, $5->code, $9->code, $7->code),
-                $3, $5, $7, $9, NULL);
+                tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $3,
+                tok("SEMICOLON", @4.first_line), $5, tok("SEMICOLON", @6.first_line), $7,
+                tok("RPAREN", @8.first_line), $9, NULL);
     }
     | LBRACE statement_list RBRACE {
-        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $2->code), $2, NULL);
+        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $2->code),
+                tok("LBRACE", @1.first_line), $2, tok("RBRACE", @3.first_line), NULL);
     }
     | LBRACE RBRACE {
-        $$ = mk("statement", @1.first_line, strdup("    {}\n"), NULL);
+        $$ = mk("statement", @1.first_line, strdup("    {}\n"),
+                tok("LBRACE", @1.first_line), tok("RBRACE", @2.first_line), NULL);
     }
     | BREAK SEMICOLON {
-        $$ = mk("statement", @1.first_line, strdup("    break;\n"), NULL);
+        $$ = mk("statement", @1.first_line, strdup("    break;\n"),
+                tok("BREAK", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
     | CONTINUE SEMICOLON {
-        $$ = mk("statement", @1.first_line, strdup("    continue;\n"), NULL);
+        $$ = mk("statement", @1.first_line, strdup("    continue;\n"),
+                tok("CONTINUE", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
 ;
 
-/* as tres secoes do for, cada uma opcional: for (init; cond; incr) */
+/* as tres secoes do for, cada uma opcional: for (init; cond; incr).
+   Secao vazia vira o no da secao com um filho ε */
 for_init:
-    /* vazio */ { $$ = mk("for_init", @$.first_line, strdup(""), NULL); }
+    /* vazio */ {
+        $$ = mk("for_init", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
     | type_specifier declarator_list {
-        /* forma da declaracao na arvore fica para a issue #17 */
-        node_free($1);
-        $$ = $2;
+        $$ = mk("for_init", @1.first_line, strdup($2->code), $1, $2, NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code), $3, NULL);
+        $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
 
 for_cond:
-    /* vazio */ { $$ = mk("for_cond", @$.first_line, strdup("true"), NULL); }
-    | expr { $$ = $1; }
+    /* vazio */ {
+        $$ = mk("for_cond", @$.first_line, strdup("true"), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
+    | expr { $$ = mk("for_cond", @1.first_line, strdup($1->code), $1, NULL); }
 ;
 
 for_incr:
-    /* vazio */ { $$ = mk("for_incr", @$.first_line, strdup(""), NULL); }
+    /* vazio */ {
+        $$ = mk("for_incr", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
     | IDENTIFIER ASSIGN expr {
-        $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code), $3, NULL);
+        $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
 
@@ -307,19 +331,24 @@ for_incr:
 declarator:
     IDENTIFIER {
         $$ = mk("declarator", @1.first_line,
-                format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)), NULL);
+                format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)),
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
         $$ = mk("declarator", @1.first_line,
                 format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
-                $3, NULL);
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
 
+/* recursiva a esquerda: `int a, b, c;` fica aninhada, sem achatar */
 declarator_list:
-    declarator { $$ = $1; }
+    declarator {
+        $$ = mk("declarator_list", @1.first_line, strdup($1->code), $1, NULL);
+    }
     | declarator_list ',' declarator {
-        $$ = mk("declarator_list", @1.first_line, format_str("%s%s", $1->code, $3->code), $1, $3, NULL);
+        $$ = mk("declarator_list", @1.first_line, format_str("%s%s", $1->code, $3->code),
+                $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
