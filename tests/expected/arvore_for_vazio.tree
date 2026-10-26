@@ -1,0 +1,49 @@
+program
+└── function_list
+    └── function
+        ├── type_specifier
+        │   └── TYPE_KW (int)
+        ├── IDENTIFIER (main)
+        ├── LPAREN
+        ├── opt_param_list
+        │   └── ε
+        ├── RPAREN
+        ├── LBRACE
+        ├── statement_list
+        │   ├── statement_list
+        │   │   ├── statement_list
+        │   │   │   └── statement
+        │   │   │       ├── type_specifier
+        │   │   │       │   └── TYPE_KW (int)
+        │   │   │       ├── declarator_list
+        │   │   │       │   └── declarator
+        │   │   │       │       ├── IDENTIFIER (i)
+        │   │   │       │       ├── ASSIGN
+        │   │   │       │       └── expr
+        │   │   │       │           └── INT_NUMBER (0)
+        │   │   │       └── SEMICOLON
+        │   │   └── statement
+        │   │       ├── FOR
+        │   │       ├── LPAREN
+        │   │       ├── for_init
+        │   │       │   └── ε
+        │   │       ├── SEMICOLON
+        │   │       ├── for_cond
+        │   │       │   └── ε
+        │   │       ├── SEMICOLON
+        │   │       ├── for_incr
+        │   │       │   └── ε
+        │   │       ├── RPAREN
+        │   │       └── statement
+        │   │           ├── LBRACE
+        │   │           ├── statement_list
+        │   │           │   └── statement
+        │   │           │       ├── BREAK
+        │   │           │       └── SEMICOLON
+        │   │           └── RBRACE
+        │   └── statement
+        │       ├── RETURN
+        │       ├── expr
+        │       │   └── IDENTIFIER (i)
+        │       └── SEMICOLON
+        └── RBRACE

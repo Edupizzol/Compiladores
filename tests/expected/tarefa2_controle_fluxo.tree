@@ -1,0 +1,204 @@
+program
+└── function_list
+    └── function
+        ├── type_specifier
+        │   └── TYPE_KW (int)
+        ├── IDENTIFIER (main)
+        ├── LPAREN
+        ├── opt_param_list
+        │   └── ε
+        ├── RPAREN
+        ├── LBRACE
+        ├── statement_list
+        │   ├── statement_list
+        │   │   ├── statement_list
+        │   │   │   ├── statement_list
+        │   │   │   │   ├── statement_list
+        │   │   │   │   │   ├── statement_list
+        │   │   │   │   │   │   ├── statement_list
+        │   │   │   │   │   │   │   ├── statement_list
+        │   │   │   │   │   │   │   │   ├── statement_list
+        │   │   │   │   │   │   │   │   │   └── statement
+        │   │   │   │   │   │   │   │   │       ├── type_specifier
+        │   │   │   │   │   │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │   │   │   │   │   │       ├── declarator_list
+        │   │   │   │   │   │   │   │   │       │   └── declarator
+        │   │   │   │   │   │   │   │   │       │       └── IDENTIFIER (i)
+        │   │   │   │   │   │   │   │   │       └── SEMICOLON
+        │   │   │   │   │   │   │   │   └── statement
+        │   │   │   │   │   │   │   │       ├── type_specifier
+        │   │   │   │   │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │   │   │   │   │       ├── declarator_list
+        │   │   │   │   │   │   │   │       │   ├── declarator_list
+        │   │   │   │   │   │   │   │       │   │   ├── declarator_list
+        │   │   │   │   │   │   │   │       │   │   │   └── declarator
+        │   │   │   │   │   │   │   │       │   │   │       └── IDENTIFIER (a)
+        │   │   │   │   │   │   │   │       │   │   ├── ','
+        │   │   │   │   │   │   │   │       │   │   └── declarator
+        │   │   │   │   │   │   │   │       │   │       └── IDENTIFIER (b)
+        │   │   │   │   │   │   │   │       │   ├── ','
+        │   │   │   │   │   │   │   │       │   └── declarator
+        │   │   │   │   │   │   │   │       │       └── IDENTIFIER (c)
+        │   │   │   │   │   │   │   │       └── SEMICOLON
+        │   │   │   │   │   │   │   └── statement
+        │   │   │   │   │   │   │       ├── type_specifier
+        │   │   │   │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │   │   │   │       ├── declarator_list
+        │   │   │   │   │   │   │       │   └── declarator
+        │   │   │   │   │   │   │       │       ├── IDENTIFIER (total)
+        │   │   │   │   │   │   │       │       ├── ASSIGN
+        │   │   │   │   │   │   │       │       └── expr
+        │   │   │   │   │   │   │       │           └── INT_NUMBER (0)
+        │   │   │   │   │   │   │       └── SEMICOLON
+        │   │   │   │   │   │   └── statement
+        │   │   │   │   │   │       ├── IF
+        │   │   │   │   │   │       ├── LPAREN
+        │   │   │   │   │   │       ├── expr
+        │   │   │   │   │   │       │   └── IDENTIFIER (i)
+        │   │   │   │   │   │       ├── RPAREN
+        │   │   │   │   │   │       └── statement
+        │   │   │   │   │   │           ├── IF
+        │   │   │   │   │   │           ├── LPAREN
+        │   │   │   │   │   │           ├── expr
+        │   │   │   │   │   │           │   └── IDENTIFIER (a)
+        │   │   │   │   │   │           ├── RPAREN
+        │   │   │   │   │   │           ├── statement
+        │   │   │   │   │   │           │   ├── IDENTIFIER (total)
+        │   │   │   │   │   │           │   ├── ASSIGN
+        │   │   │   │   │   │           │   ├── expr
+        │   │   │   │   │   │           │   │   └── INT_NUMBER (1)
+        │   │   │   │   │   │           │   └── SEMICOLON
+        │   │   │   │   │   │           ├── ELSE
+        │   │   │   │   │   │           └── statement
+        │   │   │   │   │   │               ├── IDENTIFIER (total)
+        │   │   │   │   │   │               ├── ASSIGN
+        │   │   │   │   │   │               ├── expr
+        │   │   │   │   │   │               │   └── INT_NUMBER (2)
+        │   │   │   │   │   │               └── SEMICOLON
+        │   │   │   │   │   └── statement
+        │   │   │   │   │       ├── IF
+        │   │   │   │   │       ├── LPAREN
+        │   │   │   │   │       ├── expr
+        │   │   │   │   │       │   └── IDENTIFIER (b)
+        │   │   │   │   │       ├── RPAREN
+        │   │   │   │   │       ├── statement
+        │   │   │   │   │       │   ├── LBRACE
+        │   │   │   │   │       │   ├── statement_list
+        │   │   │   │   │       │   │   └── statement
+        │   │   │   │   │       │   │       ├── IDENTIFIER (total)
+        │   │   │   │   │       │   │       ├── ASSIGN
+        │   │   │   │   │       │   │       ├── expr
+        │   │   │   │   │       │   │       │   └── INT_NUMBER (3)
+        │   │   │   │   │       │   │       └── SEMICOLON
+        │   │   │   │   │       │   └── RBRACE
+        │   │   │   │   │       ├── ELSE
+        │   │   │   │   │       └── statement
+        │   │   │   │   │           ├── LBRACE
+        │   │   │   │   │           ├── statement_list
+        │   │   │   │   │           │   └── statement
+        │   │   │   │   │           │       ├── IDENTIFIER (total)
+        │   │   │   │   │           │       ├── ASSIGN
+        │   │   │   │   │           │       ├── expr
+        │   │   │   │   │           │       │   └── INT_NUMBER (4)
+        │   │   │   │   │           │       └── SEMICOLON
+        │   │   │   │   │           └── RBRACE
+        │   │   │   │   └── statement
+        │   │   │   │       ├── WHILE
+        │   │   │   │       ├── LPAREN
+        │   │   │   │       ├── expr
+        │   │   │   │       │   └── IDENTIFIER (total)
+        │   │   │   │       ├── RPAREN
+        │   │   │   │       └── statement
+        │   │   │   │           ├── LBRACE
+        │   │   │   │           ├── statement_list
+        │   │   │   │           │   ├── statement_list
+        │   │   │   │           │   │   └── statement
+        │   │   │   │           │   │       ├── IDENTIFIER (total)
+        │   │   │   │           │   │       ├── ASSIGN
+        │   │   │   │           │   │       ├── expr
+        │   │   │   │           │   │       │   ├── expr
+        │   │   │   │           │   │       │   │   └── IDENTIFIER (total)
+        │   │   │   │           │   │       │   ├── PLUS
+        │   │   │   │           │   │       │   └── expr
+        │   │   │   │           │   │       │       └── INT_NUMBER (1)
+        │   │   │   │           │   │       └── SEMICOLON
+        │   │   │   │           │   └── statement
+        │   │   │   │           │       ├── IF
+        │   │   │   │           │       ├── LPAREN
+        │   │   │   │           │       ├── expr
+        │   │   │   │           │       │   └── IDENTIFIER (total)
+        │   │   │   │           │       ├── RPAREN
+        │   │   │   │           │       ├── statement
+        │   │   │   │           │       │   ├── BREAK
+        │   │   │   │           │       │   └── SEMICOLON
+        │   │   │   │           │       ├── ELSE
+        │   │   │   │           │       └── statement
+        │   │   │   │           │           ├── CONTINUE
+        │   │   │   │           │           └── SEMICOLON
+        │   │   │   │           └── RBRACE
+        │   │   │   └── statement
+        │   │   │       ├── FOR
+        │   │   │       ├── LPAREN
+        │   │   │       ├── for_init
+        │   │   │       │   ├── type_specifier
+        │   │   │       │   │   └── TYPE_KW (int)
+        │   │   │       │   └── declarator_list
+        │   │   │       │       └── declarator
+        │   │   │       │           ├── IDENTIFIER (j)
+        │   │   │       │           ├── ASSIGN
+        │   │   │       │           └── expr
+        │   │   │       │               └── INT_NUMBER (0)
+        │   │   │       ├── SEMICOLON
+        │   │   │       ├── for_cond
+        │   │   │       │   └── expr
+        │   │   │       │       └── IDENTIFIER (j)
+        │   │   │       ├── SEMICOLON
+        │   │   │       ├── for_incr
+        │   │   │       │   ├── IDENTIFIER (j)
+        │   │   │       │   ├── ASSIGN
+        │   │   │       │   └── expr
+        │   │   │       │       ├── expr
+        │   │   │       │       │   └── IDENTIFIER (j)
+        │   │   │       │       ├── PLUS
+        │   │   │       │       └── expr
+        │   │   │       │           └── INT_NUMBER (1)
+        │   │   │       ├── RPAREN
+        │   │   │       └── statement
+        │   │   │           ├── LBRACE
+        │   │   │           ├── statement_list
+        │   │   │           │   └── statement
+        │   │   │           │       ├── IDENTIFIER (total)
+        │   │   │           │       ├── ASSIGN
+        │   │   │           │       ├── expr
+        │   │   │           │       │   ├── expr
+        │   │   │           │       │   │   └── IDENTIFIER (total)
+        │   │   │           │       │   ├── PLUS
+        │   │   │           │       │   └── expr
+        │   │   │           │       │       └── IDENTIFIER (j)
+        │   │   │           │       └── SEMICOLON
+        │   │   │           └── RBRACE
+        │   │   └── statement
+        │   │       ├── FOR
+        │   │       ├── LPAREN
+        │   │       ├── for_init
+        │   │       │   └── ε
+        │   │       ├── SEMICOLON
+        │   │       ├── for_cond
+        │   │       │   └── ε
+        │   │       ├── SEMICOLON
+        │   │       ├── for_incr
+        │   │       │   └── ε
+        │   │       ├── RPAREN
+        │   │       └── statement
+        │   │           ├── LBRACE
+        │   │           ├── statement_list
+        │   │           │   └── statement
+        │   │           │       ├── BREAK
+        │   │           │       └── SEMICOLON
+        │   │           └── RBRACE
+        │   └── statement
+        │       ├── RETURN
+        │       ├── expr
+        │       │   └── IDENTIFIER (total)
+        │       └── SEMICOLON
+        └── RBRACE
