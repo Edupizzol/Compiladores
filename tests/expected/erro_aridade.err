@@ -1,0 +1,4 @@
+Erro semântico na linha 7: função 'f' espera 1 argumento(s), mas recebeu 2
+Erro semântico na linha 8: função 'f' espera 1 argumento(s), mas recebeu 0
+Erro semântico na linha 9: função 'g' não declarada
+Erro semântico na linha 10: função 'h' não declarada
