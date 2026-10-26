@@ -42,12 +42,19 @@ static Node *mk(const char *label, int line, char *code, ...) {
     return n;
 }
 
+/* folha de um token de texto fixo (pontuacao, operador, palavra reservada):
+   so o nome do token, sem lexema. Os tokens com lexema proprio (IDENTIFIER,
+   TYPE_KW, numeros) usam node_leaf direto */
+static Node *tok(const char *label, int line) {
+    return node_leaf(label, NULL, line);
+}
+
 /* no de expressao binaria `expr OP expr`: o operador vira folha do token
    (PLUS, STAR...) entre os dois operandos. `gen` e binop_expr ou cmp_expr */
-static Node *binop_node(Node *lhs, const char *tok, const char *op, int op_line, Node *rhs,
+static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs,
                         char *(*gen)(char *, const char *, char *)) {
     return mk("expr", lhs->line, gen(lhs->code, op, rhs->code),
-              lhs, node_leaf(tok, op, op_line), rhs, NULL);
+              lhs, tok(op_tok, op_line), rhs, NULL);
 }
 
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
@@ -320,13 +327,14 @@ expr:
     INT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
-        $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", buf, @1.first_line), NULL);
+        $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | FLOAT_NUMBER {
-        char *buf = malloc(32), lexeme[32];
+        char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
-        snprintf(lexeme, sizeof lexeme, "%g", $1.f_val);
-        $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", lexeme, @1.first_line), NULL);
+        $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | IDENTIFIER {
         $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
@@ -341,14 +349,14 @@ expr:
         }
         /* a arvore guarda os parenteses como estao no fonte, independente do codegen */
         $$ = mk("expr", @1.first_line, buf,
-                node_leaf("LPAREN", "(", @1.first_line), $2, node_leaf("RPAREN", ")", @3.first_line), NULL);
+                tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
         sprintf(buf, "%s(%s)", $1.s_val, $3->code);
         $$ = mk("expr", @1.first_line, buf,
-                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), node_leaf("LPAREN", "(", @2.first_line),
-                $3, node_leaf("RPAREN", ")", @4.first_line), NULL);
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("LPAREN", @2.first_line),
+                $3, tok("RPAREN", @4.first_line), NULL);
     }
     | expr PLUS expr    { $$ = binop_node($1, "PLUS", "+", @2.first_line, $3, binop_expr); }
     | expr MINUS expr   { $$ = binop_node($1, "MINUS", "-", @2.first_line, $3, binop_expr); }
@@ -369,10 +377,10 @@ expr:
     | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, cmp_expr); }
     | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, cmp_expr); }
     | NOT expr {
-        $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), node_leaf("NOT", "!", @1.first_line), $2, NULL);
+        $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
     }
     | MINUS expr %prec UMINUS {
-        $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), node_leaf("MINUS", "-", @1.first_line), $2, NULL);
+        $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), tok("MINUS", @1.first_line), $2, NULL);
     }
 ;
 
@@ -389,7 +397,7 @@ arg_list:
     | arg_list ',' expr {
         char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
         sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("arg_list", @1.first_line, buf, $1, node_leaf("','", ",", @2.first_line), $3, NULL);
+        $$ = mk("arg_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 

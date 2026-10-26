@@ -55,11 +55,11 @@ ESC     \\([ntr0abfv\\'"?]|x[0-9a-fA-F]+)
 "break"         { return BREAK; }
 "continue"      { return CONTINUE; }
 
- /* literais numericos */
-{DIGIT}+\.{DIGIT}*{EXP}?  { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-\.{DIGIT}+{EXP}?          { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-{DIGIT}+{EXP}             { yylval.val.f_val = atof(yytext); return FLOAT_NUMBER; }
-{DIGIT}+                  { yylval.val.i_val = atoi(yytext); return INT_NUMBER; }
+ /* literais numericos: o valor vai pro codegen e o lexema (s_val) pra folha da arvore */
+{DIGIT}+\.{DIGIT}*{EXP}?  { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+\.{DIGIT}+{EXP}?          { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+{DIGIT}+{EXP}             { yylval.val.f_val = atof(yytext); yylval.val.s_val = strdup(yytext); return FLOAT_NUMBER; }
+{DIGIT}+                  { yylval.val.i_val = atoi(yytext); yylval.val.s_val = strdup(yytext); return INT_NUMBER; }
 
  /* literais de char e string: guardam o texto com as aspas, que ja e valido em Rust ('\0', "a\n") */
 \'([^'\\\n]|{ESC})\'      { yylval.val.s_val = strdup(yytext); return CHAR_LITERAL; }
