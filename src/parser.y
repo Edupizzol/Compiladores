@@ -42,6 +42,21 @@ static Node *mk(const char *label, int line, char *code, ...) {
     return n;
 }
 
+/* folha de um token de texto fixo (pontuacao, operador, palavra reservada):
+   so o nome do token, sem lexema. Os tokens com lexema proprio (IDENTIFIER,
+   TYPE_KW, numeros) usam node_leaf direto */
+static Node *tok(const char *label, int line) {
+    return node_leaf(label, NULL, line);
+}
+
+/* no de expressao binaria `expr OP expr`: o operador vira folha do token
+   (PLUS, STAR...) entre os dois operandos. `gen` e binop_expr ou cmp_expr */
+static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs,
+                        char *(*gen)(char *, const char *, char *)) {
+    return mk("expr", lhs->line, gen(lhs->code, op, rhs->code),
+              lhs, tok(op_tok, op_line), rhs, NULL);
+}
+
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
    `type_specifier` antes de reduzir declarator_list (statement e for_init) */
 static DataType current_decl_type;
@@ -312,64 +327,77 @@ expr:
     INT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
-        $$ = mk("expr", @1.first_line, buf, NULL);
+        $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | FLOAT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
-        $$ = mk("expr", @1.first_line, buf, NULL);
+        $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
+        free($1.s_val);
     }
     | IDENTIFIER {
-        $$ = mk("expr", @1.first_line, strdup($1.s_val), NULL);
+        $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | LPAREN expr RPAREN {
+        char *buf;
         if (is_wrapped($2->code)) {
-            $$ = $2; /* ex. (a == b) ja vem entre parenteses do cmp_expr */
+            buf = strdup($2->code); /* ex. (a == b) ja vem entre parenteses do cmp_expr */
         } else {
-            char *buf = malloc(strlen($2->code) + 3);
+            buf = malloc(strlen($2->code) + 3);
             sprintf(buf, "(%s)", $2->code);
-            $$ = mk("expr", @1.first_line, buf, $2, NULL);
         }
+        /* a arvore guarda os parenteses como estao no fonte, independente do codegen */
+        $$ = mk("expr", @1.first_line, buf,
+                tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
         char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
         sprintf(buf, "%s(%s)", $1.s_val, $3->code);
-        $$ = mk("expr", @1.first_line, buf, $3, NULL);
+        $$ = mk("expr", @1.first_line, buf,
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("LPAREN", @2.first_line),
+                $3, tok("RPAREN", @4.first_line), NULL);
     }
-    | expr PLUS expr    { $$ = mk("expr", @1.first_line, binop_expr($1->code, "+", $3->code), $1, $3, NULL); }
-    | expr MINUS expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "-", $3->code), $1, $3, NULL); }
-    | expr STAR expr    { $$ = mk("expr", @1.first_line, binop_expr($1->code, "*", $3->code), $1, $3, NULL); }
-    | expr SLASH expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "/", $3->code), $1, $3, NULL); }
-    | expr MOD expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "%", $3->code), $1, $3, NULL); }
-    | expr XOR expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "^", $3->code), $1, $3, NULL); }
-    | expr OR expr      { $$ = mk("expr", @1.first_line, binop_expr($1->code, "||", $3->code), $1, $3, NULL); }
-    | expr BINOR expr   { $$ = mk("expr", @1.first_line, binop_expr($1->code, "|", $3->code), $1, $3, NULL); }
-    | expr AND expr     { $$ = mk("expr", @1.first_line, binop_expr($1->code, "&&", $3->code), $1, $3, NULL); }
-    | expr EC expr      { $$ = mk("expr", @1.first_line, binop_expr($1->code, "&", $3->code), $1, $3, NULL); }
-    | expr SHIFTL expr  { $$ = mk("expr", @1.first_line, binop_expr($1->code, "<<", $3->code), $1, $3, NULL); }
-    | expr SHIFTR expr  { $$ = mk("expr", @1.first_line, binop_expr($1->code, ">>", $3->code), $1, $3, NULL); }
-    | expr COMP expr    { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "==", $3->code), $1, $3, NULL); }
-    | expr NE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "!=", $3->code), $1, $3, NULL); }
-    | expr LT expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "<", $3->code), $1, $3, NULL); }
-    | expr GT expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, ">", $3->code), $1, $3, NULL); }
-    | expr LE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, "<=", $3->code), $1, $3, NULL); }
-    | expr GE expr      { $$ = mk("expr", @1.first_line, cmp_expr($1->code, ">=", $3->code), $1, $3, NULL); }
-    | NOT expr          { $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), $2, NULL); }
-    | MINUS expr %prec UMINUS { $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), $2, NULL); }
+    | expr PLUS expr    { $$ = binop_node($1, "PLUS", "+", @2.first_line, $3, binop_expr); }
+    | expr MINUS expr   { $$ = binop_node($1, "MINUS", "-", @2.first_line, $3, binop_expr); }
+    | expr STAR expr    { $$ = binop_node($1, "STAR", "*", @2.first_line, $3, binop_expr); }
+    | expr SLASH expr   { $$ = binop_node($1, "SLASH", "/", @2.first_line, $3, binop_expr); }
+    | expr MOD expr     { $$ = binop_node($1, "MOD", "%", @2.first_line, $3, binop_expr); }
+    | expr XOR expr     { $$ = binop_node($1, "XOR", "^", @2.first_line, $3, binop_expr); }
+    | expr OR expr      { $$ = binop_node($1, "OR", "||", @2.first_line, $3, binop_expr); }
+    | expr BINOR expr   { $$ = binop_node($1, "BINOR", "|", @2.first_line, $3, binop_expr); }
+    | expr AND expr     { $$ = binop_node($1, "AND", "&&", @2.first_line, $3, binop_expr); }
+    | expr EC expr      { $$ = binop_node($1, "EC", "&", @2.first_line, $3, binop_expr); }
+    | expr SHIFTL expr  { $$ = binop_node($1, "SHIFTL", "<<", @2.first_line, $3, binop_expr); }
+    | expr SHIFTR expr  { $$ = binop_node($1, "SHIFTR", ">>", @2.first_line, $3, binop_expr); }
+    | expr COMP expr    { $$ = binop_node($1, "COMP", "==", @2.first_line, $3, cmp_expr); }
+    | expr NE expr      { $$ = binop_node($1, "NE", "!=", @2.first_line, $3, cmp_expr); }
+    | expr LT expr      { $$ = binop_node($1, "LT", "<", @2.first_line, $3, cmp_expr); }
+    | expr GT expr      { $$ = binop_node($1, "GT", ">", @2.first_line, $3, cmp_expr); }
+    | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, cmp_expr); }
+    | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, cmp_expr); }
+    | NOT expr {
+        $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
+    }
+    | MINUS expr %prec UMINUS {
+        $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), tok("MINUS", @1.first_line), $2, NULL);
+    }
 ;
 
 /* argumentos de uma chamada: f(), f(a) ou f(a, b + 1, g(c)) */
 opt_arg_list:
-    arg_list { $$ = $1; }
-    | /* vazio */ { $$ = mk("opt_arg_list", @$.first_line, strdup(""), NULL); }
+    arg_list { $$ = mk("opt_arg_list", @1.first_line, strdup($1->code), $1, NULL); }
+    | /* vazio */ {
+        $$ = mk("opt_arg_list", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+    }
 ;
 
 arg_list:
-    expr { $$ = $1; }
+    expr { $$ = mk("arg_list", @1.first_line, strdup($1->code), $1, NULL); }
     | arg_list ',' expr {
         char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
         sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("arg_list", @1.first_line, buf, $1, $3, NULL);
+        $$ = mk("arg_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
