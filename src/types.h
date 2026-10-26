@@ -28,6 +28,8 @@ static inline const char* type_to_rust(DataType type) {
     }
 }
 
+/* nome do tipo em C, pras folhas TYPE_KW da arvore (#16) e pra tabela de
+   simbolos (--symtab, #25) */
 static inline const char* type_to_c(DataType type) {
     switch (type) {
         case TYPE_INT:    return "int";

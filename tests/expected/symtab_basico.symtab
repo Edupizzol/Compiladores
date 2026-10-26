@@ -1,0 +1,4 @@
+ESCOPO  NÍVEL  NOME  CATEGORIA  TIPO       LINHA
+0       0      f     função     int (int)  1
+1       1      x     parâmetro  int        1
+1       1      y     variável   int        1
