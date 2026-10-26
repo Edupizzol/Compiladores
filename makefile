@@ -51,8 +51,10 @@ run: $(TARGET)
 #   .err     -> espera exit code != 0 e compara o stderr
 # Imprime OK/FALHA por arquivo, mostra o diff na falha e sai com codigo
 # != 0 se algum falhar.
+# Depois roda a sanidade da arvore: as folhas tem que bater com os tokens.
 test: $(TARGET)
 	@bash $(TEST_DIR)/run_tests.sh
+	@bash $(TEST_DIR)/check_tree_tokens.sh
 
 clean:
 	rm -f $(TARGET) $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)

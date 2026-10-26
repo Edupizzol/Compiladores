@@ -9,7 +9,9 @@ typedef enum {
     TYPE_VOID
 } DataType;
 
-typedef union {
+/* valor de um token. Nos numeros o lexer preenche o valor (i_val/f_val) e
+   tambem o lexema (s_val), que vai pra folha da arvore igual ao fonte */
+typedef struct {
     int i_val;
     double f_val;
     char *s_val;
