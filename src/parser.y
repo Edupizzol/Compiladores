@@ -98,6 +98,10 @@ static int is_wrapped(const char *s) {
 #include "ast.h"
 }
 
+/* no erro sintatico o bison descarta os nos que ja estavam na pilha: sem
+   isto eles vazariam (a arvore parcial nunca chega em parse_root) */
+%destructor { node_free($$); } <node>
+
 %union {
     DataType data_type;
     ValueData val;
@@ -173,9 +177,9 @@ function:
         char *buf = malloc(strlen($2.s_val) + strlen($4->code) + strlen(ret_type) + strlen($7->code) + 32);
         sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $4->code, ret_type, $7->code);
         $$ = mk("function", @1.first_line, buf,
-                $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), node_leaf("LPAREN", "(", @3.first_line),
-                $4, node_leaf("RPAREN", ")", @5.first_line), node_leaf("LBRACE", "{", @6.first_line),
-                $7, node_leaf("RBRACE", "}", @8.first_line), NULL);
+                $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
+                $4, tok("RPAREN", @5.first_line), tok("LBRACE", @6.first_line),
+                $7, tok("RBRACE", @8.first_line), NULL);
     }
 ;
 
@@ -197,7 +201,7 @@ param_list:
     | param_list ',' param {
         char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
         sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("param_list", @1.first_line, buf, $1, node_leaf("','", ",", @2.first_line), $3, NULL);
+        $$ = mk("param_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
