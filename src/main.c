@@ -100,6 +100,13 @@ int main(int argc, char **argv) {
     }
 
     fclose(yyin);
+
+    /* com erro sintatico nao ha arvore: so a mensagem do yyerror */
+    if (ret == 0 && (g_options & OPT_TREE))
+        tree_print(parse_root, stdout);
+    if (ret == 0 && (g_options & OPT_DOT))
+        tree_to_dot(parse_root, stdout);
+
     node_free(parse_root);
     return ret;
 }
