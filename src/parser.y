@@ -330,7 +330,7 @@ statement:
     }
     | RETURN expr SEMICOLON {
         char *buf = malloc(strlen($2->code) + 32);
-        sprintf(buf, "    // return %s;\n", $2->code);
+        sprintf(buf, "    return %s;\n", $2->code);
         $$ = mk("statement", @1.first_line, buf,
                 tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
     }
@@ -551,4 +551,4 @@ void parser_cleanup(void) {
 
 const char *token_name(int tok) {
     return yytname[YYTRANSLATE(tok)];
-}
+}

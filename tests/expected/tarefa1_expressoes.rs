@@ -1,13 +1,13 @@
 fn zero() -> i32 {
-    // return 0;
+    return 0;
 }
 
 fn soma(a: i32, b: i32) -> i32 {
-    // return a + b;
+    return a + b;
 }
 
 fn media(x: f64, y: f64) -> f64 {
-    // return (x + y) / 2.000000;
+    return (x + y) / 2.000000;
 }
 
 fn main() -> i32 {
@@ -29,5 +29,5 @@ fn main() -> i32 {
     let mut c2: i32 = soma(a, b * 2);
     let mut c3: i32 = soma(soma(a, 1), zero()) + 1;
     let mut m: f64 = media(1.500000, 2.500000) * 2.000000;
-    // return (soma(r1, c3) > 10) && (a != b);
+    return (soma(r1, c3) > 10) && (a != b);
 }

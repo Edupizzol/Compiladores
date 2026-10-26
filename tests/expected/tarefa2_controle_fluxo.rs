@@ -47,5 +47,5 @@ fn main() -> i32 {
             
         }
     }
-    // return total;
+    return total;
 }
