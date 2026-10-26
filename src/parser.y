@@ -11,6 +11,7 @@
 
 void yyerror(const char *s);
 int yylex(void);
+extern int lexical_errors;
 
 static char *binop_expr(char *lhs, const char *op, char *rhs) {
     char *buf = malloc(strlen(lhs) + strlen(op) + strlen(rhs) + 4);
@@ -208,8 +209,9 @@ program:
         semantic_check_calls();
         /* o Rust so sai quando nenhuma flag de analise esta ligada
            (--tree, --dot, --symtab): a saida e a analise, nao o codigo.
-           Programa com erro semantico e invalido e tambem nao gera Rust */
-        if (emit_code && semantic_errors == 0) printf("%s", $1->code);
+           Programa com erro lexico ou semantico e invalido e tambem nao
+           gera Rust */
+        if (emit_code && lexical_errors == 0 && semantic_errors == 0) printf("%s", $1->code);
     }
 ;
 
@@ -453,13 +455,11 @@ expr:
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
         $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
-        free($1.s_val);
     }
     | FLOAT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
         $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
-        free($1.s_val);
     }
     | IDENTIFIER {
         check_var_use($1.s_val, @1.first_line);
@@ -535,7 +535,11 @@ extern int yylineno;
 extern char *yytext;
 
 void yyerror(const char *s) {
-    fprintf(stderr, "Erro sintático na linha %d: %s (próximo a '%s')\n", yylineno, s, yytext);
+    /* no EOF o yytext vem vazio: "proximo a ''" nao diz nada */
+    if (yytext[0] == '\0')
+        fprintf(stderr, "Erro sintático na linha %d: %s (no fim do arquivo)\n", yylineno, s);
+    else
+        fprintf(stderr, "Erro sintático na linha %d: %s (próximo a '%s')\n", yylineno, s, yytext);
 }
 
 /* libera o que o parser guarda entre as regras (chamada pelo main no fim) */

@@ -36,8 +36,9 @@ qualquer flag de análise ligada (`--tree`, `--dot`, `--symtab`) o Rust **não**
 é impresso, porque a saída passa a ser a análise. O `--tokens` combinado com
 uma delas lista os tokens e depois roda o parser no mesmo arquivo.
 
-Exit code: 0 se o programa é válido e ≠ 0 em erro sintático, erro semântico
-ou arquivo inexistente.
+Exit code: 0 se o programa é válido e ≠ 0 em erro léxico, sintático ou
+semântico, ou com arquivo inexistente. Com erro léxico o Rust também não é
+impresso, mesmo que o parser consiga seguir.
 
 Os arquivos gerados por bison/flex (`parser.tab.c`, `parser.tab.h`,
 `lex.yy.c`) e o binário `compiler` não vão pro repositório (ver
@@ -198,6 +199,7 @@ não é erro (o Rust também aceita funções em qualquer ordem).
 - Árvore de derivação (`--tree`, `--dot`), tabela de símbolos com escopos
   (`--symtab`) e erros semânticos.
 - Mensagens de erro léxico, sintático e semântico com o número da linha.
+  Qualquer um deles invalida o programa (exit code ≠ 0, sem Rust).
 
 ### Ainda não suportado
 

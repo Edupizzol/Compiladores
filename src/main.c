@@ -12,6 +12,8 @@ int yyparse(void);
 int yylex(void);
 const char *token_name(int tok);
 void parser_cleanup(void);
+void lexer_free_strings(void);
+extern int lexical_errors;
 extern FILE *yyin;
 extern char *yytext;
 extern int yylineno;
@@ -116,6 +118,9 @@ int main(int argc, char **argv) {
     semantic_flush();
     if (syntax_ok && semantic_errors > 0)
         ret = 1;
+    /* erro lexico tambem invalida o programa, mesmo no --tokens */
+    if (lexical_errors > 0)
+        ret = 1;
 
     /* a arvore e a tabela saem mesmo com erro semantico (ajuda a depurar) */
     if (syntax_ok && (g_options & OPT_TREE))
@@ -128,5 +133,6 @@ int main(int argc, char **argv) {
     node_free(parse_root);
     parser_cleanup();
     symtab_free();
+    lexer_free_strings();
     return ret;
 }
