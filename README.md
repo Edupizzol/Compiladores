@@ -26,14 +26,15 @@ make clean    # remove os artefatos gerados
 ./compiler --tokens arquivo.c   # só roda o léxico e lista os tokens (linha, token, texto)
 ./compiler --tree arquivo.c     # imprime a árvore de derivação em texto
 ./compiler --types arquivo.c    # imprime a árvore com o tipo de cada expressão
+./compiler --tac arquivo.c      # imprime o código de três endereços (TAC)
 ./compiler --dot arquivo.c      # exporta a árvore em Graphviz (DOT)
 ./compiler --symtab arquivo.c   # imprime a tabela de símbolos
 ./compiler --help               # lista todas as flags
 ```
 
 As flags podem ser combinadas, por exemplo `./compiler --tree --symtab
-arquivo.c`. A saída sai sempre na ordem tokens, árvore, árvore com tipos, DOT e tabela. Com
-qualquer flag de análise ligada (`--tree`, `--types`, `--dot`, `--symtab`) o Rust **não**
+arquivo.c`. A saída sai sempre na ordem tokens, árvore, árvore com tipos, DOT, tabela e TAC. Com
+qualquer flag de análise ligada (`--tree`, `--types`, `--dot`, `--symtab`, `--tac`) o Rust **não**
 é impresso, porque a saída passa a ser a análise. O `--tokens` combinado com
 uma delas lista os tokens e depois roda o parser no mesmo arquivo.
 
@@ -55,6 +56,7 @@ src/
   symtab.h/.c    # tabela de símbolos: hash por nome, pilha e histórico de escopos
   symtab_dump.h/.c # formatação da tabela pro --symtab
   semantic.h/.c  # semantic_error(), a checagem das chamadas e as regras de tipo
+  tac.h/.c       # gerador de código de três endereços (--tac)
   types.h        # DataType, ValueData, type_to_rust() e type_to_c()
   options.h      # flags de CLI (OPT_*) e o switch emit_code
   codegen.h      # reservado para separar o codegen do parser (vazio)
@@ -198,9 +200,37 @@ Cada `expr` da árvore guarda o tipo em `Node->type` (`--types` imprime a
 | `return expr` em função `void` | `função 'f' é void e não pode retornar valor` |
 | condição `void` | `a condição do 'if' é void` |
 
-Uma chamada a função definida **depois** do uso tem o tipo desconhecido
-naquele ponto (`expr [?]` no `--types`): só os argumentos `void` e a aridade
-são checados, no fim do programa.
+Uma chamada a função definida **depois** do uso não tem o tipo conhecido
+enquanto o parser lê a expressão. No fim do programa a árvore é percorrida de
+novo e esses tipos são resolvidos (por isso o `--types` e o TAC saem certos),
+mas os erros de tipo *dentro* dessas expressões não são checados: só os
+argumentos `void` e a aridade. O Rust gerado também fica sem os casts delas.
+
+## Código de três endereços (TAC)
+
+`./compiler --tac` percorre a árvore já anotada e imprime o TAC, no lugar do
+Rust. Cada função vira `func nome(params):` ... `endfunc`; cada operação
+gasta um temporário (`t0`, `t1`, ...) e os saltos usam rótulos (`L0`, ...),
+que recomeçam a cada função. Programa com erro não gera TAC.
+
+`int x = a + b * c;` fica:
+
+```
+t0 = b * c
+t1 = a + t0
+x = t1
+```
+
+- `&&` e `||` têm curto-circuito, com `if t goto L` / `ifFalse t goto L`, e
+  dão sempre 0 ou 1.
+- As conversões implícitas aparecem (`t1 = (float) a`), a partir dos tipos da
+  árvore. Isso vale pra operandos, atribuição, inicialização, argumento e
+  `return`.
+- Chamada: `param t` pra cada argumento, em ordem, e `t = call f, n`.
+- `if`/`else`, `while` e `for` viram `ifFalse` + `goto`; `break` e `continue`
+  saltam pro fim e pro próximo passo do laço (no `for`, a atualização).
+- Variáveis de mesmo nome em escopos aninhados ganham um sufixo (`x` e
+  `x.1`), porque o TAC não tem escopos.
 
 ## O que já funciona
 
@@ -270,6 +300,7 @@ esperado que decide a flag passada pro compilador:
 | `<nome>.dot`       | `--dot`      | stdout: a árvore em Graphviz             |
 | `<nome>.symtab`    | `--symtab`   | stdout: a tabela de símbolos             |
 | `<nome>.types`     | `--types`    | stdout: a árvore com os tipos            |
+| `<nome>.tac`       | `--tac`      | stdout: o código de três endereços       |
 | `<nome>.err`       | *(nenhuma)*  | stderr, e o exit code tem que ser ≠ 0    |
 
 Pra adicionar um caso de teste:

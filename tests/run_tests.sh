@@ -9,6 +9,7 @@
 #   .tree    -> --tree,   compara o stdout (a arvore em texto)
 #   .symtab  -> --symtab, compara o stdout (a tabela de simbolos)
 #   .types   -> --types,  compara o stdout (a arvore com os tipos)
+#   .tac     -> --tac,    compara o stdout (o codigo de tres enderecos)
 #   .err     -> sem flag, espera exit code != 0 e compara o stderr
 #
 # Sai com codigo 0 se todos passarem, != 0 se algum falhar.
@@ -41,6 +42,7 @@ flag_for() {
         .tree)   echo "--tree" ;;
         .symtab) echo "--symtab" ;;
         .types)  echo "--types" ;;
+        .tac)    echo "--tac" ;;
         .dot)    echo "--dot" ;;
         *)       echo "" ;;
     esac
