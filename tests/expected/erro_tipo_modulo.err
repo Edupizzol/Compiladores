@@ -1,0 +1,3 @@
+Erro semântico na linha 6: operador '%' exige operandos inteiros (recebeu float e int)
+Erro semântico na linha 7: operador '<<' exige operandos inteiros (recebeu int e double)
+Erro semântico na linha 8: operador '&' exige operandos inteiros (recebeu float e int)

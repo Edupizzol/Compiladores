@@ -30,6 +30,7 @@ static void usage(FILE *out, const char *prog) {
         "opções:\n"
         "  --tokens    só roda o léxico e lista os tokens (linha, token, texto)\n"
         "  --tree      imprime a árvore de derivação em texto\n"
+        "  --types     imprime a árvore com o tipo de cada expressão\n"
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
         "  --help      mostra esta ajuda\n"
@@ -56,6 +57,8 @@ int main(int argc, char **argv) {
             g_options |= OPT_TOKENS;
         } else if (strcmp(arg, "--tree") == 0) {
             g_options |= OPT_TREE;
+        } else if (strcmp(arg, "--types") == 0) {
+            g_options |= OPT_TYPES;
         } else if (strcmp(arg, "--dot") == 0) {
             g_options |= OPT_DOT;
         } else if (strcmp(arg, "--symtab") == 0) {
@@ -82,7 +85,7 @@ int main(int argc, char **argv) {
     }
 
     /* o Rust so e impresso se nenhuma flag de analise estiver ligada */
-    emit_code = (g_options & (OPT_TREE | OPT_DOT | OPT_SYMTAB)) == 0;
+    emit_code = (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB)) == 0;
 
     yyin = fopen(input, "r");
     if (!yyin) {
@@ -96,7 +99,7 @@ int main(int argc, char **argv) {
     int ret;
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
-        if (g_options & (OPT_TREE | OPT_DOT | OPT_SYMTAB)) {
+        if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB)) {
             /* combinado com uma flag de analise: volta pro comeco do arquivo
                pra que o parser tambem possa rodar em cima dele */
             rewind(yyin);
@@ -125,6 +128,8 @@ int main(int argc, char **argv) {
     /* a arvore e a tabela saem mesmo com erro semantico (ajuda a depurar) */
     if (syntax_ok && (g_options & OPT_TREE))
         tree_print(parse_root, stdout);
+    if (syntax_ok && (g_options & OPT_TYPES))
+        tree_print_typed(parse_root, stdout);
     if (syntax_ok && (g_options & OPT_DOT))
         tree_to_dot(parse_root, stdout);
     if (syntax_ok && (g_options & OPT_SYMTAB))

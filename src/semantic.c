@@ -8,6 +8,20 @@
 
 int semantic_errors = 0;
 
+int type_is_numeric(DataType t) {
+    return t == TYPE_INT || t == TYPE_FLOAT || t == TYPE_DOUBLE || t == TYPE_CHAR;
+}
+
+int type_is_integer(DataType t) {
+    return t == TYPE_INT || t == TYPE_CHAR;
+}
+
+DataType type_promote(DataType a, DataType b) {
+    if (a == TYPE_DOUBLE || b == TYPE_DOUBLE) return TYPE_DOUBLE;
+    if (a == TYPE_FLOAT || b == TYPE_FLOAT) return TYPE_FLOAT;
+    return TYPE_INT;
+}
+
 typedef struct {
     int line;
     char *msg;
@@ -63,6 +77,7 @@ typedef struct {
     char *name;
     int n_args;
     int line;
+    DataType *arg_types;    /* so nas chamadas a funcao ainda nao definida */
 } Call;
 
 static Call *calls;
@@ -76,7 +91,15 @@ void semantic_call(const char *name, int n_args, int line) {
     calls[n_calls].name = strdup(name);
     calls[n_calls].n_args = n_args;
     calls[n_calls].line = line;
+    calls[n_calls].arg_types = NULL;
     n_calls++;
+}
+
+void semantic_call_arg_types(const DataType *types, int n) {
+    if (n_calls == 0 || n == 0) return;
+    Call *c = &calls[n_calls - 1];
+    c->arg_types = malloc(n * sizeof(DataType));
+    memcpy(c->arg_types, types, n * sizeof(DataType));
 }
 
 void semantic_check_calls(void) {
@@ -88,13 +111,21 @@ void semantic_check_calls(void) {
         else if (f->n_params != c->n_args)
             semantic_error(c->line, "função '%s' espera %d argumento(s), mas recebeu %d",
                            c->name, f->n_params, c->n_args);
+        else if (c->arg_types) {
+            /* todo tipo numerico converte pro do parametro; so void nao vale */
+            for (int a = 0; a < c->n_args; a++)
+                if (c->arg_types[a] == TYPE_VOID)
+                    semantic_error(c->line, "argumento %d de '%s' é void", a + 1, c->name);
+        }
     }
     free_calls();
 }
 
 static void free_calls(void) {
-    for (int i = 0; i < n_calls; i++)
+    for (int i = 0; i < n_calls; i++) {
         free(calls[i].name);
+        free(calls[i].arg_types);
+    }
     free(calls);
     calls = NULL;
     n_calls = cap_calls = 0;

@@ -52,14 +52,6 @@ static Node *tok(const char *label, int line) {
     return node_leaf(label, NULL, line);
 }
 
-/* no de expressao binaria `expr OP expr`: o operador vira folha do token
-   (PLUS, STAR...) entre os dois operandos. `gen` e binop_expr ou cmp_expr */
-static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs,
-                        char *(*gen)(char *, const char *, char *)) {
-    return mk("expr", lhs->line, gen(lhs->code, op, rhs->code),
-              lhs, tok(op_tok, op_line), rhs, NULL);
-}
-
 /* tipo da declaracao em andamento, setado pela acao intermediaria em
    `type_specifier` antes de reduzir declarator_list (statement e for_init) */
 static DataType current_decl_type;
@@ -68,17 +60,24 @@ static DataType current_decl_type;
    depois do LPAREN (antes que os params troquem o current_decl_type), e cada
    `param` acrescenta o seu tipo. A funcao entra na tabela depois do RPAREN */
 static DataType current_func_ret;
+static const char *current_func_name;
 static DataType *current_func_params;
 static int current_func_n, current_func_cap;
 
 /* uso de `name` como variavel (em expressao ou como alvo de atribuicao):
    tem que haver uma variavel ou parametro visivel com esse nome */
-static void check_var_use(const char *name, int line) {
+static DataType check_var_use(const char *name, int line) {
     Symbol *sym = symtab_lookup(name);
-    if (!sym)
+    if (!sym) {
         semantic_error(line, "variável '%s' não declarada", name);
-    else if (sym->kind == SYM_FUNC)
+        return TYPE_ERROR;
+    }
+    if (sym->kind == SYM_FUNC) {
         semantic_error(line, "'%s' é uma função, não uma variável", name);
+        return TYPE_ERROR;
+    }
+    /* variavel void ja foi reportada na declaracao */
+    return sym->type == TYPE_VOID ? TYPE_ERROR : sym->type;
 }
 
 /* quantos argumentos tem um opt_arg_list: o vazio tem so o filho ε, e o
@@ -97,6 +96,8 @@ static int count_args(const Node *opt_arg_list) {
 /* declaracao de variavel: redeclarar no mesmo escopo e erro, mas esconder
    um nome de um escopo externo (sombreamento) e valido */
 static void declare_var(const char *name, int line) {
+    if (current_decl_type == TYPE_VOID)
+        semantic_error(line, "variável '%s' não pode ser do tipo void", name);
     if (symtab_insert(name, SYM_VAR, current_decl_type, line) != 0)
         semantic_error(line, "variável '%s' já declarada neste escopo (linha %d)",
                        name, symtab_lookup_current(name)->line);
@@ -139,6 +140,127 @@ static int is_wrapped(const char *s) {
         if (depth == 0 && i < len - 1) return 0;
     }
     return 1;
+}
+
+/* ---- tipos (#44) ---- */
+
+/* tipo "silencioso": erro ja reportado ou ainda desconhecido, nao gera
+   outro erro por cima */
+static int type_silent(DataType t) {
+    return t == TYPE_ERROR || t == TYPE_UNKNOWN || t == TYPE_NONE;
+}
+
+/* 1 se o codigo e um identificador ou numero simples (nao precisa de
+   parenteses antes de um `as`) */
+static int is_simple(const char *s) {
+    for (; *s; s++)
+        if (!((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'z') ||
+              (*s >= 'A' && *s <= 'Z') || *s == '_' || *s == '.'))
+            return 0;
+    return 1;
+}
+
+/* o cast de Rust equivalente a conversao implicita de C. char nao faz cast
+   direto de/para float em Rust, entao passa por i32 (ou u8) */
+static char *cast_code(const char *code, DataType from, DataType to) {
+    const char *inner = (is_simple(code) || is_wrapped(code)) ? "%s" : "(%s)";
+    char fmt[64];
+    if (to == TYPE_CHAR)
+        snprintf(fmt, sizeof fmt, "(%s as u8 as char)", inner);
+    else if (from == TYPE_CHAR && to != TYPE_INT)
+        snprintf(fmt, sizeof fmt, "(%s as i32 as %%s)", inner);
+    else
+        snprintf(fmt, sizeof fmt, "(%s as %%s)", inner);
+    return format_str(fmt, code, type_to_rust(to));
+}
+
+static int is_float_literal(const Node *n) {
+    return n->n_children == 1 && strcmp(n->children[0]->label, "FLOAT_NUMBER") == 0;
+}
+
+/* codigo de `n` convertido pro tipo `to` (malloc novo). So converte entre
+   tipos numericos diferentes; o literal float nao precisa (o do Rust se
+   ajusta a f32/f64) */
+static char *coerce(const Node *n, DataType to) {
+    DataType from = n->type;
+    if (!type_is_numeric(from) || !type_is_numeric(to) || from == to)
+        return strdup(n->code);
+    if (is_float_literal(n) && (to == TYPE_FLOAT || to == TYPE_DOUBLE))
+        return strdup(n->code);
+    return cast_code(n->code, from, to);
+}
+
+/* guarda `src` num destino do tipo `dst` (atribuicao, inicializacao,
+   argumento, return). Devolve o codigo ja convertido. void nao e valor:
+   `fmt` e `name` montam a mensagem do erro */
+static char *convert_to(const Node *src, DataType dst, int line, const char *fmt, const char *name) {
+    if (src->type == TYPE_VOID && dst != TYPE_ERROR)
+        semantic_error(line, fmt, name);
+    return coerce(src, dst);
+}
+
+/* condicao de if/while/for tem que ser um valor */
+static void check_cond(const Node *cond, int line, const char *what) {
+    if (cond->type == TYPE_VOID)
+        semantic_error(line, "a condição do '%s' é void", what);
+}
+
+/* tipos de operador: aritmetico, so inteiro (% << >> & | ^), comparacao e
+   logico (&& ||) */
+enum { OPK_ARITH, OPK_INT, OPK_CMP, OPK_LOGIC };
+
+/* no de expressao binaria `expr OP expr`: o operador vira folha do token
+   (PLUS, STAR...) entre os dois operandos. Calcula o tipo do resultado, com
+   as conversoes aritmeticas de C, e converte os operandos com cast quando
+   os tipos diferem (comparacao e logico dao int, como em C) */
+static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs, int kind) {
+    DataType lt = lhs->type, rt = rhs->type;
+    DataType res = TYPE_ERROR, operand = TYPE_NONE;
+
+    if (lt == TYPE_VOID || rt == TYPE_VOID) {
+        semantic_error(op_line, "operador '%s' não se aplica a operando void", op);
+    } else if (lt == TYPE_ERROR || rt == TYPE_ERROR) {
+        res = TYPE_ERROR;
+    } else if (lt == TYPE_UNKNOWN || rt == TYPE_UNKNOWN) {
+        res = TYPE_UNKNOWN;
+    } else if (kind == OPK_INT && !(type_is_integer(lt) && type_is_integer(rt))) {
+        semantic_error(op_line, "operador '%s' exige operandos inteiros (recebeu %s e %s)",
+                       op, type_to_c(lt), type_to_c(rt));
+    } else {
+        operand = type_promote(lt, rt);
+        res = (kind == OPK_ARITH || kind == OPK_INT) ? operand : TYPE_INT;
+        if (kind == OPK_LOGIC) operand = TYPE_NONE;
+    }
+
+    char *l = coerce(lhs, operand), *r = coerce(rhs, operand);
+    char *code = (kind == OPK_CMP ? cmp_expr : binop_expr)(l, op, r);
+    free(l);
+    free(r);
+    Node *n = mk("expr", lhs->line, code, lhs, tok(op_tok, op_line), rhs, NULL);
+    n->type = res;
+    return n;
+}
+
+/* escreve em out[0..n) os nos dos argumentos de um opt_arg_list com n
+   argumentos (arg_list aninha a esquerda: o ultimo e o filho da direita) */
+static void collect_args(const Node *opt_arg_list, const Node **out, int n) {
+    const Node *list = opt_arg_list->children[0];
+    for (int i = n - 1; i >= 0; i--) {
+        out[i] = list->children[list->n_children - 1];
+        list = list->children[0];
+    }
+}
+/* tipo de um operador unario: void nao vale; `fixed` e o tipo do resultado
+   (`!` da sempre int), ou TYPE_NONE pra promover o do operando (`-` de char
+   da int) */
+static DataType unary_type(const Node *operand, const char *op, int line, DataType fixed) {
+    DataType t = operand->type;
+    if (t == TYPE_VOID) {
+        semantic_error(line, "operador '%s' não se aplica a operando void", op);
+        return TYPE_ERROR;
+    }
+    if (type_silent(t)) return t == TYPE_NONE ? TYPE_ERROR : t;
+    return fixed != TYPE_NONE ? fixed : type_promote(t, TYPE_INT);
 }
 %}
 
@@ -235,6 +357,7 @@ function:
     type_specifier IDENTIFIER LPAREN {
         scope_enter();
         current_func_ret = current_decl_type;
+        current_func_name = $2.s_val;
         current_func_n = 0;
     }
     opt_param_list RPAREN {
@@ -281,6 +404,8 @@ param_list:
 param:
     type_specifier IDENTIFIER {
         /* o type_specifier acabou de ser reduzido: current_decl_type e o tipo dele */
+        if (current_decl_type == TYPE_VOID)
+            semantic_error(@2.first_line, "parâmetro '%s' não pode ser do tipo void", $2.s_val);
         if (symtab_insert($2.s_val, SYM_PARAM, current_decl_type, @2.first_line) != 0) {
             semantic_error(@2.first_line, "parâmetro '%s' repetido (linha %d)",
                            $2.s_val, symtab_lookup_current($2.s_val)->line);
@@ -321,20 +446,30 @@ statement:
                 $1, $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
-        check_var_use($1.s_val, @1.first_line);
-        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 32);
-        sprintf(buf, "    %s = %s;\n", $1.s_val, $3->code);
+        DataType target = check_var_use($1.s_val, @1.first_line);
+        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        char *buf = format_str("    %s = %s;\n", $1.s_val, val);
+        free(val);
         $$ = mk("statement", @1.first_line, buf,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line),
                 $3, tok("SEMICOLON", @4.first_line), NULL);
     }
     | RETURN expr SEMICOLON {
-        char *buf = malloc(strlen($2->code) + 32);
-        sprintf(buf, "    // return %s;\n", $2->code);
+        char *val;
+        if (current_func_ret == TYPE_VOID) {
+            if ($2->type != TYPE_ERROR)
+                semantic_error(@1.first_line, "função '%s' é void e não pode retornar valor", current_func_name);
+            val = strdup($2->code);
+        } else {
+            val = convert_to($2, current_func_ret, @1.first_line, "'return' com valor void em '%s'", current_func_name);
+        }
+        char *buf = format_str("    // return %s;\n", val);
+        free(val);
         $$ = mk("statement", @1.first_line, buf,
                 tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IF LPAREN expr RPAREN statement %prec IFX {
+        check_cond($3, @1.first_line, "if");
         $$ = mk("statement", @1.first_line,
                 format_str("    if %s {\n%s    }\n", $3->code, $5->code),
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
@@ -342,12 +477,14 @@ statement:
     }
     | IF LPAREN expr RPAREN statement ELSE statement {
         /* o ELSE fica no mesmo no do IF mais proximo (dangling-else) */
+        check_cond($3, @1.first_line, "if");
         $$ = mk("statement", @1.first_line,
                 format_str("    if %s {\n%s    } else {\n%s    }\n", $3->code, $5->code, $7->code),
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, tok("ELSE", @6.first_line), $7, NULL);
     }
     | WHILE LPAREN expr RPAREN statement {
+        check_cond($3, @1.first_line, "while");
         $$ = mk("statement", @1.first_line,
                 format_str("    while %s {\n%s    }\n", $3->code, $5->code),
                 tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
@@ -398,8 +535,11 @@ for_init:
         $$ = mk("for_init", @1.first_line, strdup($2->code), $1, $2, NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        check_var_use($1.s_val, @1.first_line);
-        $$ = mk("for_init", @1.first_line, format_str("%s = %s;\n", $1.s_val, $3->code),
+        DataType target = check_var_use($1.s_val, @1.first_line);
+        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        char *buf = format_str("%s = %s;\n", $1.s_val, val);
+        free(val);
+        $$ = mk("for_init", @1.first_line, buf,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
@@ -408,7 +548,10 @@ for_cond:
     /* vazio */ {
         $$ = mk("for_cond", @$.first_line, strdup("true"), node_leaf("ε", NULL, @$.first_line), NULL);
     }
-    | expr { $$ = mk("for_cond", @1.first_line, strdup($1->code), $1, NULL); }
+    | expr {
+        check_cond($1, @1.first_line, "for");
+        $$ = mk("for_cond", @1.first_line, strdup($1->code), $1, NULL);
+    }
 ;
 
 for_incr:
@@ -416,8 +559,11 @@ for_incr:
         $$ = mk("for_incr", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
-        check_var_use($1.s_val, @1.first_line);
-        $$ = mk("for_incr", @1.first_line, format_str("%s = %s;", $1.s_val, $3->code),
+        DataType target = check_var_use($1.s_val, @1.first_line);
+        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        char *buf = format_str("%s = %s;", $1.s_val, val);
+        free(val);
+        $$ = mk("for_incr", @1.first_line, buf,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
@@ -433,8 +579,11 @@ declarator:
     }
     | IDENTIFIER ASSIGN expr {
         declare_var($1.s_val, @1.first_line);
-        $$ = mk("declarator", @1.first_line,
-                format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), $3->code),
+        /* o tipo declarado vale pro valor: int x = 2.5 converte com cast */
+        char *val = convert_to($3, current_decl_type, @2.first_line, "inicialização de '%s' com valor void", $1.s_val);
+        char *code = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), val);
+        free(val);
+        $$ = mk("declarator", @1.first_line, code,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
@@ -455,15 +604,18 @@ expr:
         char *buf = malloc(32);
         sprintf(buf, "%d", $1.i_val);
         $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
+        $$->type = TYPE_INT;
     }
     | FLOAT_NUMBER {
         char *buf = malloc(32);
         sprintf(buf, "%f", $1.f_val);
         $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
+        $$->type = TYPE_DOUBLE; /* literal sem sufixo e double em C */
     }
     | IDENTIFIER {
-        check_var_use($1.s_val, @1.first_line);
+        DataType t = check_var_use($1.s_val, @1.first_line);
         $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
+        $$->type = t;
     }
     | LPAREN expr RPAREN {
         char *buf;
@@ -476,39 +628,78 @@ expr:
         /* a arvore guarda os parenteses como estao no fonte, independente do codegen */
         $$ = mk("expr", @1.first_line, buf,
                 tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
+        $$->type = $2->type;
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
-        /* checada so no fim do programa: a funcao pode vir depois */
-        semantic_call($1.s_val, count_args($3), @1.first_line);
-        char *buf = malloc(strlen($1.s_val) + strlen($3->code) + 3);
-        sprintf(buf, "%s(%s)", $1.s_val, $3->code);
+        /* a aridade (e a existencia) so e checada no fim do programa: a
+           funcao pode vir depois */
+        int n = count_args($3);
+        semantic_call($1.s_val, n, @1.first_line);
+        const Node **args = malloc((n + 1) * sizeof(Node *));
+        collect_args($3, args, n);
+        Symbol *f = symtab_lookup_func($1.s_val);
+        DataType rtype = TYPE_UNKNOWN;
+        char *buf;
+        if (f) {
+            /* funcao ja definida: o resultado tem o tipo de retorno dela e
+               cada argumento vira o tipo do parametro (com cast se difere).
+               Com a aridade errada (reportada no fim) nao ha como casar */
+            rtype = f->type;
+            char *list = strdup("");
+            for (int i = 0; i < n; i++) {
+                if (args[i]->type == TYPE_VOID)
+                    semantic_error(@1.first_line, "argumento %d de '%s' é void", i + 1, $1.s_val);
+                char *a = coerce(args[i], f->n_params == n ? f->param_types[i] : TYPE_NONE);
+                char *joined = format_str(i ? "%s, %s" : "%s%s", list, a);
+                free(list);
+                free(a);
+                list = joined;
+            }
+            buf = format_str("%s(%s)", $1.s_val, list);
+            free(list);
+        } else {
+            /* funcao definida mais adiante: tipo do resultado desconhecido, e
+               os argumentos so podem ser checados no fim do programa */
+            DataType *types = malloc((n + 1) * sizeof(DataType));
+            for (int i = 0; i < n; i++) types[i] = args[i]->type;
+            semantic_call_arg_types(types, n);
+            free(types);
+            buf = format_str("%s(%s)", $1.s_val, $3->code);
+        }
+        free(args);
         $$ = mk("expr", @1.first_line, buf,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("LPAREN", @2.first_line),
                 $3, tok("RPAREN", @4.first_line), NULL);
+        $$->type = rtype;
     }
-    | expr PLUS expr    { $$ = binop_node($1, "PLUS", "+", @2.first_line, $3, binop_expr); }
-    | expr MINUS expr   { $$ = binop_node($1, "MINUS", "-", @2.first_line, $3, binop_expr); }
-    | expr STAR expr    { $$ = binop_node($1, "STAR", "*", @2.first_line, $3, binop_expr); }
-    | expr SLASH expr   { $$ = binop_node($1, "SLASH", "/", @2.first_line, $3, binop_expr); }
-    | expr MOD expr     { $$ = binop_node($1, "MOD", "%", @2.first_line, $3, binop_expr); }
-    | expr XOR expr     { $$ = binop_node($1, "XOR", "^", @2.first_line, $3, binop_expr); }
-    | expr OR expr      { $$ = binop_node($1, "OR", "||", @2.first_line, $3, binop_expr); }
-    | expr BINOR expr   { $$ = binop_node($1, "BINOR", "|", @2.first_line, $3, binop_expr); }
-    | expr AND expr     { $$ = binop_node($1, "AND", "&&", @2.first_line, $3, binop_expr); }
-    | expr EC expr      { $$ = binop_node($1, "EC", "&", @2.first_line, $3, binop_expr); }
-    | expr SHIFTL expr  { $$ = binop_node($1, "SHIFTL", "<<", @2.first_line, $3, binop_expr); }
-    | expr SHIFTR expr  { $$ = binop_node($1, "SHIFTR", ">>", @2.first_line, $3, binop_expr); }
-    | expr COMP expr    { $$ = binop_node($1, "COMP", "==", @2.first_line, $3, cmp_expr); }
-    | expr NE expr      { $$ = binop_node($1, "NE", "!=", @2.first_line, $3, cmp_expr); }
-    | expr LT expr      { $$ = binop_node($1, "LT", "<", @2.first_line, $3, cmp_expr); }
-    | expr GT expr      { $$ = binop_node($1, "GT", ">", @2.first_line, $3, cmp_expr); }
-    | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, cmp_expr); }
-    | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, cmp_expr); }
+    | expr PLUS expr    { $$ = binop_node($1, "PLUS", "+", @2.first_line, $3, OPK_ARITH); }
+    | expr MINUS expr   { $$ = binop_node($1, "MINUS", "-", @2.first_line, $3, OPK_ARITH); }
+    | expr STAR expr    { $$ = binop_node($1, "STAR", "*", @2.first_line, $3, OPK_ARITH); }
+    | expr SLASH expr   { $$ = binop_node($1, "SLASH", "/", @2.first_line, $3, OPK_ARITH); }
+    | expr MOD expr     { $$ = binop_node($1, "MOD", "%", @2.first_line, $3, OPK_INT); }
+    | expr XOR expr     { $$ = binop_node($1, "XOR", "^", @2.first_line, $3, OPK_INT); }
+    | expr OR expr      { $$ = binop_node($1, "OR", "||", @2.first_line, $3, OPK_LOGIC); }
+    | expr BINOR expr   { $$ = binop_node($1, "BINOR", "|", @2.first_line, $3, OPK_INT); }
+    | expr AND expr     { $$ = binop_node($1, "AND", "&&", @2.first_line, $3, OPK_LOGIC); }
+    | expr EC expr      { $$ = binop_node($1, "EC", "&", @2.first_line, $3, OPK_INT); }
+    | expr SHIFTL expr  { $$ = binop_node($1, "SHIFTL", "<<", @2.first_line, $3, OPK_INT); }
+    | expr SHIFTR expr  { $$ = binop_node($1, "SHIFTR", ">>", @2.first_line, $3, OPK_INT); }
+    | expr COMP expr    { $$ = binop_node($1, "COMP", "==", @2.first_line, $3, OPK_CMP); }
+    | expr NE expr      { $$ = binop_node($1, "NE", "!=", @2.first_line, $3, OPK_CMP); }
+    | expr LT expr      { $$ = binop_node($1, "LT", "<", @2.first_line, $3, OPK_CMP); }
+    | expr GT expr      { $$ = binop_node($1, "GT", ">", @2.first_line, $3, OPK_CMP); }
+    | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, OPK_CMP); }
+    | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, OPK_CMP); }
     | NOT expr {
         $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
+        $$->type = unary_type($2, "!", @1.first_line, TYPE_INT);
     }
     | MINUS expr %prec UMINUS {
-        $$ = mk("expr", @1.first_line, unop_expr("-", $2->code), tok("MINUS", @1.first_line), $2, NULL);
+        DataType t = unary_type($2, "-", @1.first_line, TYPE_NONE);
+        char *operand = coerce($2, t);
+        $$ = mk("expr", @1.first_line, unop_expr("-", operand), tok("MINUS", @1.first_line), $2, NULL);
+        free(operand);
+        $$->type = t;
     }
 ;
 

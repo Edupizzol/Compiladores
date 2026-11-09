@@ -25,14 +25,15 @@ make clean    # remove os artefatos gerados
 ./compiler arquivo.c            # imprime o Rust gerado
 ./compiler --tokens arquivo.c   # só roda o léxico e lista os tokens (linha, token, texto)
 ./compiler --tree arquivo.c     # imprime a árvore de derivação em texto
+./compiler --types arquivo.c    # imprime a árvore com o tipo de cada expressão
 ./compiler --dot arquivo.c      # exporta a árvore em Graphviz (DOT)
 ./compiler --symtab arquivo.c   # imprime a tabela de símbolos
 ./compiler --help               # lista todas as flags
 ```
 
 As flags podem ser combinadas, por exemplo `./compiler --tree --symtab
-arquivo.c`. A saída sai sempre na ordem tokens, árvore, DOT e tabela. Com
-qualquer flag de análise ligada (`--tree`, `--dot`, `--symtab`) o Rust **não**
+arquivo.c`. A saída sai sempre na ordem tokens, árvore, árvore com tipos, DOT e tabela. Com
+qualquer flag de análise ligada (`--tree`, `--types`, `--dot`, `--symtab`) o Rust **não**
 é impresso, porque a saída passa a ser a análise. O `--tokens` combinado com
 uma delas lista os tokens e depois roda o parser no mesmo arquivo.
 
@@ -53,7 +54,7 @@ src/
   ast.h/.c       # Node da árvore, construção/liberação, tree_print e tree_to_dot
   symtab.h/.c    # tabela de símbolos: hash por nome, pilha e histórico de escopos
   symtab_dump.h/.c # formatação da tabela pro --symtab
-  semantic.h/.c  # semantic_error() e a checagem das chamadas de função
+  semantic.h/.c  # semantic_error(), a checagem das chamadas e as regras de tipo
   types.h        # DataType, ValueData, type_to_rust() e type_to_c()
   options.h      # flags de CLI (OPT_*) e o switch emit_code
   codegen.h      # reservado para separar o codegen do parser (vazio)
@@ -174,6 +175,33 @@ Como a gramática não tem protótipos, as chamadas de função são checadas s�
 no fim do programa. Assim, chamar uma função definida mais abaixo no arquivo
 não é erro (o Rust também aceita funções em qualquer ordem).
 
+### Tipos
+
+Cada `expr` da árvore guarda o tipo em `Node->type` (`--types` imprime a
+árvore anotada, ex. `expr [float]`). As regras são as de C:
+
+- literal inteiro é `int`, literal com ponto é `double`; variável e parâmetro
+  têm o tipo declarado; chamada tem o tipo de retorno da função;
+- aritmética e comparação usam as conversões usuais (`char` < `int` < `float`
+  < `double`): `int + float` é `float`, sem erro. Comparação e `&&`, `||`, `!`
+  dão `int`;
+- toda conversão numérica implícita (operando, atribuição, inicialização,
+  argumento, `return`) vira um cast no Rust: `int x = f + 1;` fica
+  `let mut x: i32 = ((f + (1 as f32)) as i32);`.
+
+| erro | mensagem |
+| ---- | -------- |
+| `%`, `<<`, `>>`, `&`, `\|`, `^` com `float`/`double` | `operador '%' exige operandos inteiros (recebeu float e int)` |
+| operando `void` (chamada de função `void` como valor) | `operador '+' não se aplica a operando void` |
+| variável ou parâmetro `void` | `variável 'v' não pode ser do tipo void` |
+| valor `void` atribuído, inicializado, passado ou retornado | `inicialização de 'a' com valor void` |
+| `return expr` em função `void` | `função 'f' é void e não pode retornar valor` |
+| condição `void` | `a condição do 'if' é void` |
+
+Uma chamada a função definida **depois** do uso tem o tipo desconhecido
+naquele ponto (`expr [?]` no `--types`): só os argumentos `void` e a aridade
+são checados, no fim do programa.
+
 ## O que já funciona
 
 - Léxico completo: tipos `int`, `float`, `double`, `char`, `void` e
@@ -241,6 +269,7 @@ esperado que decide a flag passada pro compilador:
 | `<nome>.tree`      | `--tree`     | stdout: a árvore de derivação em texto   |
 | `<nome>.dot`       | `--dot`      | stdout: a árvore em Graphviz             |
 | `<nome>.symtab`    | `--symtab`   | stdout: a tabela de símbolos             |
+| `<nome>.types`     | `--types`    | stdout: a árvore com os tipos            |
 | `<nome>.err`       | *(nenhuma)*  | stderr, e o exit code tem que ser ≠ 0    |
 
 Pra adicionar um caso de teste:

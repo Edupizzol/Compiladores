@@ -2,6 +2,7 @@
 #define AST_H
 
 #include <stdio.h>
+#include "types.h"
 
 /* No da arvore de derivacao. Cada regra do parser cria um no; o `code`
    guarda o trecho de Rust ja gerado para aquele no (o codegen atual ainda
@@ -11,6 +12,7 @@ typedef struct Node {
     char *text;             /* lexema, so nas folhas (NULL nos demais) */
     int line;               /* linha do fonte onde o no comeca */
     char *code;             /* trecho de Rust deste no (NULL se nao houver) */
+    DataType type;          /* tipo da expressao (so nos `expr`), TYPE_NONE nos demais */
     struct Node **children;
     int n_children, cap;
 } Node;
@@ -36,6 +38,9 @@ void node_free(Node *root);
 /* imprime a arvore em texto, um no por linha, com os ramos em ASCII
    (├── └── │). Folha com lexema sai como `IDENTIFIER (x)`. */
 void tree_print(const Node *root, FILE *out);
+
+/* igual a tree_print, mas com o tipo de cada expressao anotado: `expr [int]` */
+void tree_print_typed(const Node *root, FILE *out);
 
 /* exporta a arvore em Graphviz: um `digraph` com um no por entrada da
    arvore, folhas com shape=box e nao-terminais com shape=ellipse. Os ids

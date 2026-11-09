@@ -1,6 +1,19 @@
 #ifndef SEMANTIC_H
 #define SEMANTIC_H
 
+#include "types.h"
+
+/* tipos numericos de C (int, float, double, char): os unicos que entram em
+   aritmetica. void nao e valor */
+int type_is_numeric(DataType t);
+
+/* tipos inteiros (int, char): os unicos aceitos em % << >> & | ^ */
+int type_is_integer(DataType t);
+
+/* conversoes aritmeticas usuais de C: char vira int, e entre os demais vence
+   o maior (int < float < double). Os dois tipos tem que ser numericos */
+DataType type_promote(DataType a, DataType b);
+
 /* quantos erros semanticos o parse encontrou ate agora */
 extern int semantic_errors;
 
@@ -19,6 +32,12 @@ void semantic_flush(void);
 /* chamada de funcao vista no parse, checada no fim do programa: a gramatica
    nao tem prototipos, entao a funcao pode ser definida depois do uso */
 void semantic_call(const char *name, int n_args, int line);
+
+/* tipos dos argumentos de uma chamada a funcao ainda nao definida. As
+   chamadas a funcoes ja conhecidas tem os argumentos checados na hora, no
+   parser; estas so podem ser checadas no fim. Chamar logo depois do
+   semantic_call da mesma chamada. `types` e copiado */
+void semantic_call_arg_types(const DataType *types, int n);
 
 /* confere as chamadas guardadas contra a tabela (funcao declarada e numero
    de argumentos) e libera a lista. Rodar com o parse completo. */
