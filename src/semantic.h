@@ -14,6 +14,13 @@ int type_is_integer(DataType t);
    o maior (int < float < double). Os dois tipos tem que ser numericos */
 DataType type_promote(DataType a, DataType b);
 
+/* resolve, no fim do parse, o tipo das expressoes que dependiam de uma
+   funcao definida so depois do uso (TYPE_UNKNOWN), agora que a tabela tem
+   todas as assinaturas. Nao gera erro novo: so deixa a arvore anotada
+   completa pro --types e pro TAC */
+struct Node;
+void semantic_resolve_types(struct Node *root);
+
 /* quantos erros semanticos o parse encontrou ate agora */
 extern int semantic_errors;
 
