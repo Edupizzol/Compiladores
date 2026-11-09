@@ -8,6 +8,7 @@
 #   .rs      -> sem flag, compara o stdout (o Rust gerado)
 #   .tree    -> --tree,   compara o stdout (a arvore em texto)
 #   .symtab  -> --symtab, compara o stdout (a tabela de simbolos)
+#   .types   -> --types,  compara o stdout (a arvore com os tipos)
 #   .err     -> sem flag, espera exit code != 0 e compara o stderr
 #
 # Sai com codigo 0 se todos passarem, != 0 se algum falhar.
@@ -39,6 +40,7 @@ flag_for() {
     case "$1" in
         .tree)   echo "--tree" ;;
         .symtab) echo "--symtab" ;;
+        .types)  echo "--types" ;;
         .dot)    echo "--dot" ;;
         *)       echo "" ;;
     esac

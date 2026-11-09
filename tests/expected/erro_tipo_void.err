@@ -1,0 +1,10 @@
+Erro semântico na linha 3: função 'nada' é void e não pode retornar valor
+Erro semântico na linha 11: variável 'v' não pode ser do tipo void
+Erro semântico na linha 12: inicialização de 'a' com valor void
+Erro semântico na linha 13: operador '+' não se aplica a operando void
+Erro semântico na linha 14: argumento 1 de 'soma' é void
+Erro semântico na linha 15: operador '-' não se aplica a operando void
+Erro semântico na linha 17: atribuição de valor void a 'e'
+Erro semântico na linha 18: a condição do 'if' é void
+Erro semântico na linha 21: argumento 1 de 'later' é void
+Erro semântico na linha 28: parâmetro 'p' não pode ser do tipo void

@@ -1,0 +1,14 @@
+ESCOPO  NÍVEL  NOME   CATEGORIA  TIPO                LINHA
+0       0      media  função     float (int, float)  2
+0       0      main   função     int (void)          6
+1       1      a      parâmetro  int                 2
+1       1      b      parâmetro  float               2
+2       1      i      variável   int                 7
+2       1      f      variável   float               8
+2       1      d      variável   double              9
+2       1      c      variável   char                10
+2       1      r1     variável   int                 11
+2       1      r2     variável   double              12
+2       1      r3     variável   float               13
+2       1      r4     variável   int                 14
+2       1      r5     variável   int                 15

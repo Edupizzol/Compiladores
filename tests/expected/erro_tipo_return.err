@@ -1,0 +1,2 @@
+Erro semântico na linha 3: função 'f' é void e não pode retornar valor
+Erro semântico na linha 11: 'return' com valor void em 'h'

@@ -6,7 +6,14 @@ typedef enum {
     TYPE_FLOAT,
     TYPE_DOUBLE,
     TYPE_CHAR,
-    TYPE_VOID
+    TYPE_VOID,
+    /* marcas da anotacao de tipos na arvore (#44), nao sao tipos de C:
+       NONE = o no nao e uma expressao; UNKNOWN = tipo ainda desconhecido
+       (chamada a funcao definida mais adiante); ERROR = erro de tipo ja
+       reportado, que nao deve gerar erro em cascata */
+    TYPE_NONE,
+    TYPE_UNKNOWN,
+    TYPE_ERROR
 } DataType;
 
 /* valor de um token. Nos numeros o lexer preenche o valor (i_val/f_val) e
@@ -37,6 +44,8 @@ static inline const char* type_to_c(DataType type) {
         case TYPE_DOUBLE: return "double";
         case TYPE_CHAR:   return "char";
         case TYPE_VOID:   return "void";
+        case TYPE_UNKNOWN: return "?";
+        case TYPE_ERROR:  return "erro";
         default:          return "int";
     }
 }
