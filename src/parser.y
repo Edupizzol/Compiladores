@@ -329,6 +329,7 @@ program:
         parse_root = mk("program", @1.first_line, NULL, $1, NULL);
         /* com o programa inteiro lido, todas as funcoes ja estao na tabela */
         semantic_check_calls();
+        semantic_resolve_types(parse_root);
         /* o Rust so sai quando nenhuma flag de analise esta ligada
            (--tree, --dot, --symtab): a saida e a analise, nao o codigo.
            Programa com erro lexico ou semantico e invalido e tambem nao

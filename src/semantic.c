@@ -5,6 +5,7 @@
 
 #include "semantic.h"
 #include "symtab.h"
+#include "ast.h"
 
 int semantic_errors = 0;
 
@@ -51,6 +52,41 @@ void semantic_error(int line, const char *fmt, ...) {
 }
 
 static void free_calls(void);
+
+static int label_is(const Node *n, const char *label) {
+    return strcmp(n->label, label) == 0;
+}
+
+void semantic_resolve_types(Node *n) {
+    for (int i = 0; i < n->n_children; i++)
+        semantic_resolve_types(n->children[i]);
+    if (!label_is(n, "expr") || n->type != TYPE_UNKNOWN) return;
+
+    int k = n->n_children;
+    if (k == 4) {                                   /* chamada */
+        Symbol *f = symtab_lookup_func(n->children[0]->text);
+        n->type = f ? f->type : TYPE_ERROR;
+    } else if (k == 3 && label_is(n->children[0], "LPAREN")) {
+        n->type = n->children[1]->type;             /* ( expr ) */
+    } else if (k == 2) {                            /* ! expr, - expr */
+        DataType t = n->children[1]->type;
+        if (!type_is_numeric(t)) n->type = t == TYPE_UNKNOWN ? TYPE_ERROR : t;
+        else n->type = label_is(n->children[0], "NOT") ? TYPE_INT : type_promote(t, TYPE_INT);
+    } else if (k == 3) {                            /* expr OP expr */
+        DataType l = n->children[0]->type, r = n->children[2]->type;
+        const char *op = n->children[1]->label;
+        if (!type_is_numeric(l) || !type_is_numeric(r)) {
+            n->type = TYPE_ERROR;
+        } else if (!strcmp(op, "PLUS") || !strcmp(op, "MINUS") ||
+                   !strcmp(op, "STAR") || !strcmp(op, "SLASH")) {
+            n->type = type_promote(l, r);
+        } else {
+            /* % << >> & | ^ dao int (sao so de inteiros) e comparacao e
+               logicos tambem */
+            n->type = TYPE_INT;
+        }
+    }
+}
 
 void semantic_flush(void) {
     /* insertion sort: estavel, entao a mesma linha mantem a ordem de registro */

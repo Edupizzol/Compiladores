@@ -7,6 +7,7 @@
 #include "symtab.h"
 #include "semantic.h"
 #include "symtab_dump.h"
+#include "tac.h"
 
 int yyparse(void);
 int yylex(void);
@@ -33,6 +34,7 @@ static void usage(FILE *out, const char *prog) {
         "  --types     imprime a árvore com o tipo de cada expressão\n"
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
+        "  --tac       imprime o código de três endereços\n"
         "  --help      mostra esta ajuda\n"
         "\n"
         "as opções podem ser combinadas: %s --tree --dot arquivo.c\n",
@@ -63,6 +65,8 @@ int main(int argc, char **argv) {
             g_options |= OPT_DOT;
         } else if (strcmp(arg, "--symtab") == 0) {
             g_options |= OPT_SYMTAB;
+        } else if (strcmp(arg, "--tac") == 0) {
+            g_options |= OPT_TAC;
         } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
             usage(stdout, prog);
             return 0;
@@ -85,7 +89,7 @@ int main(int argc, char **argv) {
     }
 
     /* o Rust so e impresso se nenhuma flag de analise estiver ligada */
-    emit_code = (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB)) == 0;
+    emit_code = (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC)) == 0;
 
     yyin = fopen(input, "r");
     if (!yyin) {
@@ -99,7 +103,7 @@ int main(int argc, char **argv) {
     int ret;
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
-        if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB)) {
+        if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC)) {
             /* combinado com uma flag de analise: volta pro comeco do arquivo
                pra que o parser tambem possa rodar em cima dele */
             rewind(yyin);
@@ -134,6 +138,9 @@ int main(int argc, char **argv) {
         tree_to_dot(parse_root, stdout);
     if (syntax_ok && (g_options & OPT_SYMTAB))
         symtab_dump(stdout);
+    /* o TAC so sai pra programa valido: com erro nao ha o que gerar */
+    if (syntax_ok && (g_options & OPT_TAC) && semantic_errors == 0 && lexical_errors == 0)
+        tac_generate(parse_root, stdout);
 
     node_free(parse_root);
     parser_cleanup();
