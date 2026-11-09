@@ -463,7 +463,7 @@ statement:
         } else {
             val = convert_to($2, current_func_ret, @1.first_line, "'return' com valor void em '%s'", current_func_name);
         }
-        char *buf = format_str("    // return %s;\n", val);
+        char *buf = format_str("    return %s;\n", val);
         free(val);
         $$ = mk("statement", @1.first_line, buf,
                 tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
@@ -742,4 +742,4 @@ void parser_cleanup(void) {
 
 const char *token_name(int tok) {
     return yytname[YYTRANSLATE(tok)];
-}
+}

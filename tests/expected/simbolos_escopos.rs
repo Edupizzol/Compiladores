@@ -28,5 +28,5 @@ fn main() -> i32 {
         }
     }
     {}
-    // return x + y;
+    return x + y;
 }

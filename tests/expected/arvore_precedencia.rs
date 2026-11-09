@@ -1,9 +1,9 @@
 fn f(a: i32, b: i32) -> i32 {
-    // return a;
+    return a;
 }
 
 fn g(a: i32) -> i32 {
-    // return a;
+    return a;
 }
 
 fn main() -> i32 {
@@ -15,5 +15,5 @@ fn main() -> i32 {
     let mut p3: i32 = -a * b;
     let mut p4: i32 = !a && b;
     let mut p5: i32 = f(a, g(b));
-    // return p1;
+    return p1;
 }

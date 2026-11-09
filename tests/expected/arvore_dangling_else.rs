@@ -9,5 +9,5 @@ fn main() -> i32 {
     x = 2;
     }
     }
-    // return x;
+    return x;
 }

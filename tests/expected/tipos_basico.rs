@@ -1,5 +1,5 @@
 fn media(a: i32, b: f32) -> f32 {
-    // return ((a as f32) + b) / (2 as f32);
+    return ((a as f32) + b) / (2 as f32);
 }
 
 fn main() -> i32 {
@@ -14,5 +14,5 @@ fn main() -> i32 {
     let mut r5: i32 = i % 2 + (i << 1);
     f = (i as f32);
     i = ((f * (2 as f32)) as i32);
-    // return -i;
+    return -i;
 }
