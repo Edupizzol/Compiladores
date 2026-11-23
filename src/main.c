@@ -35,6 +35,7 @@ static void usage(FILE *out, const char *prog) {
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
         "  --tac       imprime o código de três endereços\n"
+        "  -O          liga as otimizações (constant folding)\n"
         "  --help      mostra esta ajuda\n"
         "\n"
         "as opções podem ser combinadas: %s --tree --dot arquivo.c\n",
@@ -67,6 +68,8 @@ int main(int argc, char **argv) {
             g_options |= OPT_SYMTAB;
         } else if (strcmp(arg, "--tac") == 0) {
             g_options |= OPT_TAC;
+        } else if (strcmp(arg, "-O") == 0) {
+            g_options |= OPT_OPTIMIZE;
         } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
             usage(stdout, prog);
             return 0;

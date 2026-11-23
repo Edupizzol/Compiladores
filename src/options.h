@@ -8,6 +8,7 @@
 #define OPT_SYMTAB  (1 << 3)
 #define OPT_TYPES   (1 << 4)
 #define OPT_TAC     (1 << 5)
+#define OPT_OPTIMIZE (1 << 6)  /* -O: liga as otimizacoes (#49) */
 
 /* flags ativas nesta execucao (bitmask) */
 extern int g_options;

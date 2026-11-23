@@ -8,6 +8,7 @@
 #include "ast.h"
 #include "symtab.h"
 #include "semantic.h"
+#include "optimize.h"
 
 void yyerror(const char *s);
 int yylex(void);
@@ -142,6 +143,13 @@ static int is_wrapped(const char *s) {
     return 1;
 }
 
+/* com -O, dobra a expressao recem-criada se os operandos forem literais
+   (#49). Os filhos ja passaram por aqui quando foram reduzidos */
+static Node *opt_expr(Node *n) {
+    if (g_options & OPT_OPTIMIZE) fold_constants(n);
+    return n;
+}
+
 /* ---- tipos (#44) ---- */
 
 /* tipo "silencioso": erro ja reportado ou ainda desconhecido, nao gera
@@ -238,7 +246,7 @@ static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_li
     free(r);
     Node *n = mk("expr", lhs->line, code, lhs, tok(op_tok, op_line), rhs, NULL);
     n->type = res;
-    return n;
+    return opt_expr(n);
 }
 
 /* escreve em out[0..n) os nos dos argumentos de um opt_arg_list com n
@@ -630,6 +638,7 @@ expr:
         $$ = mk("expr", @1.first_line, buf,
                 tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
         $$->type = $2->type;
+        opt_expr($$);
     }
     | IDENTIFIER LPAREN opt_arg_list RPAREN {
         /* a aridade (e a existencia) so e checada no fim do programa: a
@@ -694,6 +703,7 @@ expr:
     | NOT expr {
         $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
         $$->type = unary_type($2, "!", @1.first_line, TYPE_INT);
+        opt_expr($$);
     }
     | MINUS expr %prec UMINUS {
         DataType t = unary_type($2, "-", @1.first_line, TYPE_NONE);
@@ -701,6 +711,7 @@ expr:
         $$ = mk("expr", @1.first_line, unop_expr("-", operand), tok("MINUS", @1.first_line), $2, NULL);
         free(operand);
         $$->type = t;
+        opt_expr($$);
     }
 ;
 
