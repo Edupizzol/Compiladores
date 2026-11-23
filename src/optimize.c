@@ -171,6 +171,145 @@ static void fold_binary(Node *e) {
     }
 }
 
+/* 1 se a subarvore pode ter efeito colateral. A unica construcao do nosso
+   subconjunto com efeito colateral e a chamada de funcao, que tem a forma
+   `expr -> IDENTIFIER LPAREN opt_arg_list RPAREN` (4 filhos) */
+static int has_side_effect(const Node *n) {
+    if (!n) return 0;
+    if (strcmp(n->label, "expr") == 0 && n->n_children == 4 &&
+        strcmp(n->children[1]->label, "LPAREN") == 0)
+        return 1;
+    for (int i = 0; i < n->n_children; i++)
+        if (has_side_effect(n->children[i])) return 1;
+    return 0;
+}
+
+/* substitui o conteudo de `e` pelo subtree `keep` (um dos operandos),
+   mantendo o cast se o tipo da expressao resultante difere do de keep
+   (ex. `x` int e `(x + 0.0)` double: o codigo vira `x as f64`). Os outros
+   filhos sao liberados. `keep` passa a ser consumido (filhos adotados por
+   `e`, o no de `keep` em si e liberado) */
+static void adopt_subtree(Node *e, Node *keep) {
+    for (int i = 0; i < e->n_children; i++)
+        if (e->children[i] != keep) node_free(e->children[i]);
+    free(e->children);
+    e->children = keep->children;
+    e->n_children = keep->n_children;
+    e->cap = keep->cap;
+
+    DataType et = e->type;
+    char *new_code;
+    if (keep->type != et && type_is_numeric(keep->type) && type_is_numeric(et)) {
+        size_t n = strlen(keep->code) + 32;
+        new_code = malloc(n);
+        snprintf(new_code, n, "(%s as %s)", keep->code, type_to_rust(et));
+    } else {
+        new_code = strdup(keep->code);
+    }
+    free(e->code);
+    e->code = new_code;
+
+    free(keep->text);
+    free(keep->code);
+    free(keep);
+}
+
+/* 1 se `e` e um literal com valor `want` (inteiro ou float: `0` casa com
+   `0` e com `0.0`, o que vale pros neutros `x+0`, `x*1` etc em qualquer
+   tipo numerico) */
+static int lit_eq(const Node *e, double want) {
+    Lit v;
+    if (!literal_value(e, &v)) return 0;
+    return as_double(v) == want;
+}
+
+/* igual, mas exige literal inteiro. Serve pros casos que so valem em int:
+   absorvente (`x*0`, `x&0`), reducao de forca (`x*2`), e os operadores
+   bit a bit, onde `0` so pode ser int */
+static int int_lit_eq(const Node *e, long long want) {
+    Lit v;
+    if (!literal_value(e, &v) || v.is_float) return 0;
+    return v.i == want;
+}
+
+/* troca `x * 2` por `x << 1`: mantem o operando `keep`, substitui o `STAR`
+   por `SHIFTL` e o literal `2` por `1`, e regera o codigo. So inteiro.
+   Avaliacao unica do operando, entao vale mesmo com efeito colateral */
+static void strength_mul2(Node *e, int keep_idx, int lit_idx) {
+    Node *keep = e->children[keep_idx];
+    node_free(e->children[lit_idx]);
+    node_free(e->children[1]);
+
+    Node *one_expr = node_new("expr", e->line);
+    node_add_child(one_expr, node_leaf("INT_NUMBER", "1", e->line));
+    one_expr->type = TYPE_INT;
+    one_expr->code = strdup("1");
+
+    e->children[0] = keep;
+    e->children[1] = node_leaf("SHIFTL", NULL, e->line);
+    e->children[2] = one_expr;
+    e->n_children = 3;
+
+    free(e->code);
+    size_t n = strlen(keep->code) + 8;
+    e->code = malloc(n);
+    snprintf(e->code, n, "%s << 1", keep->code);
+}
+
+static void simplify_binary(Node *e) {
+    Node *lhs = e->children[0], *rhs = e->children[2];
+    const char *op = e->children[1]->label;
+
+    if (strcmp(op, "PLUS") == 0) {
+        if (lit_eq(rhs, 0)) { adopt_subtree(e, lhs); return; }
+        if (lit_eq(lhs, 0)) { adopt_subtree(e, rhs); return; }
+    } else if (strcmp(op, "MINUS") == 0) {
+        /* so `x - 0` -> `x`; `0 - x` vira `-x` e precisaria de outro no */
+        if (lit_eq(rhs, 0)) { adopt_subtree(e, lhs); return; }
+    } else if (strcmp(op, "STAR") == 0) {
+        if (lit_eq(rhs, 1)) { adopt_subtree(e, lhs); return; }
+        if (lit_eq(lhs, 1)) { adopt_subtree(e, rhs); return; }
+        /* absorvente e reducao de forca so em inteiro: `x * 0.0` pode dar
+           NaN quando `x` e Inf, entao nao vale como identidade */
+        if (e->type == TYPE_INT) {
+            if (int_lit_eq(rhs, 0) && !has_side_effect(lhs)) { set_int(e, 0, 0); return; }
+            if (int_lit_eq(lhs, 0) && !has_side_effect(rhs)) { set_int(e, 0, 0); return; }
+            if (int_lit_eq(rhs, 2)) { strength_mul2(e, 0, 2); return; }
+            if (int_lit_eq(lhs, 2)) { strength_mul2(e, 2, 0); return; }
+        }
+    } else if (strcmp(op, "SLASH") == 0) {
+        /* so `x / 1` -> `x`; `x / x` nao (float NaN, int div por zero) */
+        if (lit_eq(rhs, 1)) { adopt_subtree(e, lhs); return; }
+    } else if (strcmp(op, "BINOR") == 0 || strcmp(op, "XOR") == 0) {
+        if (int_lit_eq(rhs, 0)) { adopt_subtree(e, lhs); return; }
+        if (int_lit_eq(lhs, 0)) { adopt_subtree(e, rhs); return; }
+    } else if (strcmp(op, "EC") == 0) {
+        if (int_lit_eq(rhs, 0) && !has_side_effect(lhs)) { set_int(e, 0, 0); return; }
+        if (int_lit_eq(lhs, 0) && !has_side_effect(rhs)) { set_int(e, 0, 0); return; }
+    } else if (strcmp(op, "SHIFTL") == 0 || strcmp(op, "SHIFTR") == 0) {
+        /* so `x << 0`, `x >> 0`; `0 << x` nao e neutro */
+        if (int_lit_eq(rhs, 0)) { adopt_subtree(e, lhs); return; }
+    }
+}
+
+void simplify_algebraic(Node *e) {
+    if (!e || strcmp(e->label, "expr") != 0) return;
+    if (!type_is_numeric(e->type)) return;
+    if (e->n_children == 3 && strcmp(e->children[0]->label, "LPAREN") == 0) {
+        /* `(simple)` -> `simple`: parenteses em volta de identificador (ou
+           de literal que ja foi dobrado em folha unica) nao mudam o
+           significado e evitam `(x) * 1` virar `(x)` em vez de `x`. Call
+           (`(f())`, 4 filhos) fica, pra nao virar `f()` desacompanhado */
+        Node *inner = e->children[1];
+        if (inner->n_children == 1) adopt_subtree(e, inner);
+        return;
+    }
+    /* so binario `expr OP expr`: unario nao se enquadra nas identidades */
+    if (e->n_children != 3) return;
+    if (strcmp(e->children[0]->label, "expr") != 0) return;
+    simplify_binary(e);
+}
+
 void fold_constants(Node *e) {
     if (!e || strcmp(e->label, "expr") != 0) return;
     /* erro de tipo (ja reportado), void ou tipo ainda desconhecido: nao mexe */
