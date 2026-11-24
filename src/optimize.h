@@ -34,4 +34,16 @@ void fold_constants(Node *e);
    as identidades no float). */
 void simplify_algebraic(Node *e);
 
+/* codigo morto (#51), chamado pelo parser em cada statement que reduz:
+   - if com condicao literal fica so com o ramo que executa
+   - while e for com condicao literal falsa somem (o init do for fica)
+   nao avisa no stderr: o programa continua valido e o aviso quebraria os
+   testes .err */
+void eliminate_dead_code(Node *s);
+
+/* statement que vem depois de return/break/continue na mesma lista (#51):
+   list e a lista ate agora, s o statement novo; se list ja termina num
+   salto, s e apagado */
+void drop_after_jump(const Node *list, Node *s);
+
 #endif

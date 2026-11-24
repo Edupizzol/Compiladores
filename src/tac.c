@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "tac.h"
+#include "options.h"
 #include "symtab.h"
 #include "semantic.h"
 
@@ -388,6 +389,70 @@ static void gen_params(const Node *list, char **names) {
     *names = joined;
 }
 
+/* ---- limpeza dos rotulos (#51, so com -O) ---- */
+
+/* numero do rotulo se a linha e `L<n>:`, senao -1 */
+static int label_def(const char *l) {
+    if (l[0] != 'L') return -1;
+    char *end;
+    long n = strtol(l + 1, &end, 10);
+    return (end > l + 1 && end[0] == ':' && end[1] == '\0') ? (int)n : -1;
+}
+
+/* numero do rotulo para onde a linha salta (goto, if, ifFalse), senao -1 */
+static int jump_target(const char *l) {
+    const char *p = strstr(l, "goto L");
+    return p ? atoi(p + 6) : -1;
+}
+
+/* salto incondicional: a linha e so `goto L<n>` */
+static int is_plain_goto(const char *l) {
+    return strncmp(l, "    goto L", 10) == 0;
+}
+
+/* escreve em dest o TAC de uma funcao sem os `goto L` seguidos de `L:` e sem
+   os rotulos que ninguem usa. tirar um pode liberar o outro, entao repete */
+static void clean_labels(char *text, FILE *dest) {
+    int n = 0, cap = 64;
+    char **line = malloc(cap * sizeof(char *));
+    for (char *l = strtok(text, "\n"); l; l = strtok(NULL, "\n")) {
+        if (n == cap) { cap *= 2; line = realloc(line, cap * sizeof(char *)); }
+        line[n++] = l;
+    }
+    char *keep = malloc(n + 1);
+    memset(keep, 1, n);
+
+    int changed;
+    do {
+        changed = 0;
+        for (int i = 0; i < n; i++) {
+            if (!keep[i] || !is_plain_goto(line[i])) continue;
+            int j = i + 1;
+            while (j < n && !keep[j]) j++;
+            if (j < n && label_def(line[j]) == jump_target(line[i])) {
+                keep[i] = 0;
+                changed = 1;
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            int lab = keep[i] ? label_def(line[i]) : -1;
+            if (lab < 0) continue;
+            int used = 0;
+            for (int k = 0; k < n && !used; k++)
+                used = keep[k] && jump_target(line[k]) == lab;
+            if (!used) {
+                keep[i] = 0;
+                changed = 1;
+            }
+        }
+    } while (changed);
+
+    for (int i = 0; i < n; i++)
+        if (keep[i]) fprintf(dest, "%s\n", line[i]);
+    free(keep);
+    free(line);
+}
+
 static void gen_function(const Node *f) {
     ntemp = nlabel = 0;
     cur_ret = spec_type(f->children[0]);
@@ -397,12 +462,24 @@ static void gen_function(const Node *f) {
     const Node *params = f->children[3];
     if (strcmp(params->children[0]->label, "param_list") == 0)
         gen_params(params->children[0], &names);
+    FILE *dest = out;
+    char *buf = NULL;
+    size_t len = 0;
+    if (g_options & OPT_OPTIMIZE) out = open_memstream(&buf, &len);
+
     fprintf(out, "func %s(%s):\n", f->children[1]->text, names);
     free(names);
 
     gen_statement_list(f->children[6]);
     fprintf(out, "endfunc\n");
     scope_pop(mark);
+
+    if (g_options & OPT_OPTIMIZE) {
+        fclose(out);
+        out = dest;
+        clean_labels(buf, out);
+        free(buf);
+    }
 }
 
 static void gen_function_list(const Node *list, int *first) {
