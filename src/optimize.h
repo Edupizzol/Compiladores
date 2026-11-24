@@ -17,4 +17,21 @@
    ou NaN, e expressao com erro de tipo. */
 void fold_constants(Node *e);
 
+/* simplificacoes algebricas (#50). Roda depois do fold_constants na mesma
+   expressao, no mesmo percurso pos-ordem, pra pegar coisas como `x*(3-2)`
+   depois que `3-2` vira `1`.
+
+   Identidades aplicadas (so com um dos lados literal):
+   - neutro: `x+0`, `0+x`, `x-0`, `x*1`, `1*x`, `x/1`, `x|0`, `x^0`,
+     `x<<0`, `x>>0` -> `x` (com cast quando a expressao mudou de tipo,
+     ex. `x+0.0` com `x` int vira `(x as f64)`);
+   - absorvente: `x*0`, `x&0` -> `0`, so com `x` inteiro e sem efeito
+     colateral (chamada de funcao);
+   - reducao de forca: `x*2` -> `x<<1` (so inteiro; mantem a avaliacao
+     unica do operando, entao vale mesmo com `x` com efeito colateral).
+
+   Nao mexe em `x-x`, `x/x` nem em `x*0.0` (NaN e divisao por zero quebram
+   as identidades no float). */
+void simplify_algebraic(Node *e);
+
 #endif
