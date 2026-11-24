@@ -44,24 +44,23 @@ static int literal_value(const Node *e, Lit *out) {
 static double as_double(Lit v) { return v.is_float ? v.f : (double)v.i; }
 static int is_true(Lit v) { return v.is_float ? v.f != 0.0 : v.i != 0; }
 
-/* troca os filhos de `e` por uma folha so e o codigo por `code` (o no
-   continua sendo o mesmo, entao o pai nao precisa saber da troca) */
-static void replace_with_leaf(Node *e, const char *label, const char *text, const char *code) {
+/* troca os filhos de `e` por uma folha so, marcada com `folded` (FOLD_*).
+   O no continua sendo o mesmo, entao o pai nao precisa saber da troca */
+static void replace_with_leaf(Node *e, const char *label, const char *text, int folded) {
     for (int i = 0; i < e->n_children; i++)
         node_free(e->children[i]);
     e->n_children = 0;
     node_add_child(e, node_leaf(label, text, e->line));
-    free(e->code);
-    e->code = strdup(code);
+    e->folded = folded;
 }
 
 /* resultado inteiro (int de C). `rust_bool` marca comparacao e operador
-   logico: em C dao 0/1, mas no Rust gerado sao bool, entao o codigo vira
-   true/false (o mesmo tipo que a expressao original tinha no Rust) */
+   logico: em C dao 0/1, mas no Rust gerado sao bool, entao o codegen
+   escreve true/false (o mesmo tipo que a expressao original tinha no Rust) */
 static void set_int(Node *e, long long v, int rust_bool) {
     char text[32];
     snprintf(text, sizeof text, "%lld", v);
-    replace_with_leaf(e, "INT_NUMBER", text, rust_bool ? (v ? "true" : "false") : text);
+    replace_with_leaf(e, "INT_NUMBER", text, rust_bool ? FOLD_BOOL : FOLD_VALUE);
     e->type = TYPE_INT;
 }
 
@@ -74,7 +73,7 @@ static void set_float(Node *e, double v) {
         if (strtod(text, NULL) == v) break;
     }
     if (!strpbrk(text, ".e")) strcat(text, ".0");
-    replace_with_leaf(e, "FLOAT_NUMBER", text, text);
+    replace_with_leaf(e, "FLOAT_NUMBER", text, FOLD_VALUE);
 }
 
 static int fits_int(long long v) { return v >= INT_MIN && v <= INT_MAX; }
@@ -179,16 +178,15 @@ void fold_constants(Node *e) {
     if (e->n_children == 2) {
         fold_unary(e);
     } else if (e->n_children == 3 && strcmp(e->children[0]->label, "LPAREN") == 0) {
-        /* (literal) -> literal: o no fica com a folha e o codigo de dentro */
+        /* (literal) -> literal: o no fica com a folha e a marca de dentro */
         Lit v;
         Node *inner = e->children[1];
         if (!literal_value(inner, &v)) return;
         /* a folha de dentro e liberada na troca: copia antes */
         const char *label = inner->children[0]->label;
-        char *text = strdup(inner->children[0]->text), *code = strdup(inner->code);
-        replace_with_leaf(e, label, text, code);
+        char *text = strdup(inner->children[0]->text);
+        replace_with_leaf(e, label, text, inner->folded);
         free(text);
-        free(code);
     } else if (e->n_children == 3) {
         fold_binary(e);
     }

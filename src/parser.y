@@ -12,34 +12,14 @@
 
 void yyerror(const char *s);
 int yylex(void);
-extern int lexical_errors;
 
-static char *binop_expr(char *lhs, const char *op, char *rhs) {
-    char *buf = malloc(strlen(lhs) + strlen(op) + strlen(rhs) + 4);
-    sprintf(buf, "%s %s %s", lhs, op, rhs);
-    return buf;
-}
-
-/* monta strings de codegen maiores (if/while/for) sem contar tamanho na mao */
-static char *format_str(const char *fmt, ...) {
-    va_list args, args_copy;
-    va_start(args, fmt);
-    va_copy(args_copy, args);
-    int len = vsnprintf(NULL, 0, fmt, args);
-    va_end(args);
-    char *buf = malloc(len + 1);
-    vsnprintf(buf, len + 1, fmt, args_copy);
-    va_end(args_copy);
-    return buf;
-}
-
-/* cria um no `label` com o trecho de Rust `code` e anexa os filhos dados
-   (lista terminada em NULL); o no passa a ser dono deles */
-static Node *mk(const char *label, int line, char *code, ...) {
+/* cria um no `label` e anexa os filhos dados (lista terminada em NULL); o
+   no passa a ser dono deles. O Rust nao e montado aqui: ele sai depois,
+   da arvore inteira, pelo codegen_rust (#54) */
+static Node *mk(const char *label, int line, ...) {
     Node *n = node_new(label, line);
-    n->code = code;
     va_list args;
-    va_start(args, code);
+    va_start(args, line);
     for (Node *c; (c = va_arg(args, Node *)) != NULL; )
         node_add_child(n, c);
     va_end(args);
@@ -112,37 +92,6 @@ static void func_param_add(DataType t) {
     current_func_params[current_func_n++] = t;
 }
 
-/* comparacoes saem sempre entre parenteses: em Rust elas tem precedencia
-   menor que & ^ | (em C e o contrario) e nao podem ser encadeadas, entao
-   `a & b == c` precisa virar `a & (b == c)` pra manter o agrupamento de C */
-static char *cmp_expr(char *lhs, const char *op, char *rhs) {
-    char *buf = malloc(strlen(lhs) + strlen(op) + strlen(rhs) + 6);
-    sprintf(buf, "(%s %s %s)", lhs, op, rhs);
-    return buf;
-}
-
-static char *unop_expr(const char *op, char *operand) {
-    /* `- -a` nao pode colar em `--a`, que parece o decremento de C */
-    const char *sep = (op[0] == '-' && operand[0] == '-') ? " " : "";
-    char *buf = malloc(strlen(op) + strlen(sep) + strlen(operand) + 1);
-    sprintf(buf, "%s%s%s", op, sep, operand);
-    return buf;
-}
-
-/* 1 se a expressao inteira ja esta entre um unico par de parenteses,
-   ex. "(a == b)" -> 1, "(a) + (b)" -> 0 */
-static int is_wrapped(const char *s) {
-    size_t len = strlen(s);
-    if (len < 2 || s[0] != '(' || s[len - 1] != ')') return 0;
-    int depth = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (s[i] == '(') depth++;
-        else if (s[i] == ')') depth--;
-        if (depth == 0 && i < len - 1) return 0;
-    }
-    return 1;
-}
-
 /* com -O, dobra a expressao recem-criada se os operandos forem literais
    (#49). Os filhos ja passaram por aqui quando foram reduzidos */
 static Node *opt_expr(Node *n) {
@@ -158,53 +107,12 @@ static int type_silent(DataType t) {
     return t == TYPE_ERROR || t == TYPE_UNKNOWN || t == TYPE_NONE;
 }
 
-/* 1 se o codigo e um identificador ou numero simples (nao precisa de
-   parenteses antes de um `as`) */
-static int is_simple(const char *s) {
-    for (; *s; s++)
-        if (!((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'z') ||
-              (*s >= 'A' && *s <= 'Z') || *s == '_' || *s == '.'))
-            return 0;
-    return 1;
-}
-
-/* o cast de Rust equivalente a conversao implicita de C. char nao faz cast
-   direto de/para float em Rust, entao passa por i32 (ou u8) */
-static char *cast_code(const char *code, DataType from, DataType to) {
-    const char *inner = (is_simple(code) || is_wrapped(code)) ? "%s" : "(%s)";
-    char fmt[64];
-    if (to == TYPE_CHAR)
-        snprintf(fmt, sizeof fmt, "(%s as u8 as char)", inner);
-    else if (from == TYPE_CHAR && to != TYPE_INT)
-        snprintf(fmt, sizeof fmt, "(%s as i32 as %%s)", inner);
-    else
-        snprintf(fmt, sizeof fmt, "(%s as %%s)", inner);
-    return format_str(fmt, code, type_to_rust(to));
-}
-
-static int is_float_literal(const Node *n) {
-    return n->n_children == 1 && strcmp(n->children[0]->label, "FLOAT_NUMBER") == 0;
-}
-
-/* codigo de `n` convertido pro tipo `to` (malloc novo). So converte entre
-   tipos numericos diferentes; o literal float nao precisa (o do Rust se
-   ajusta a f32/f64) */
-static char *coerce(const Node *n, DataType to) {
-    DataType from = n->type;
-    if (!type_is_numeric(from) || !type_is_numeric(to) || from == to)
-        return strdup(n->code);
-    if (is_float_literal(n) && (to == TYPE_FLOAT || to == TYPE_DOUBLE))
-        return strdup(n->code);
-    return cast_code(n->code, from, to);
-}
-
-/* guarda `src` num destino do tipo `dst` (atribuicao, inicializacao,
-   argumento, return). Devolve o codigo ja convertido. void nao e valor:
-   `fmt` e `name` montam a mensagem do erro */
-static char *convert_to(const Node *src, DataType dst, int line, const char *fmt, const char *name) {
+/* `src` guardado num destino do tipo `dst` (atribuicao, inicializacao,
+   return): void nao e valor. `fmt` e `name` montam a mensagem do erro. A
+   conversao (o cast no Rust) fica com o codegen */
+static void check_value(const Node *src, DataType dst, int line, const char *fmt, const char *name) {
     if (src->type == TYPE_VOID && dst != TYPE_ERROR)
         semantic_error(line, fmt, name);
-    return coerce(src, dst);
 }
 
 /* condicao de if/while/for tem que ser um valor */
@@ -219,11 +127,10 @@ enum { OPK_ARITH, OPK_INT, OPK_CMP, OPK_LOGIC };
 
 /* no de expressao binaria `expr OP expr`: o operador vira folha do token
    (PLUS, STAR...) entre os dois operandos. Calcula o tipo do resultado, com
-   as conversoes aritmeticas de C, e converte os operandos com cast quando
-   os tipos diferem (comparacao e logico dao int, como em C) */
+   as conversoes aritmeticas de C (comparacao e logico dao int, como em C) */
 static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_line, Node *rhs, int kind) {
     DataType lt = lhs->type, rt = rhs->type;
-    DataType res = TYPE_ERROR, operand = TYPE_NONE;
+    DataType res = TYPE_ERROR;
 
     if (lt == TYPE_VOID || rt == TYPE_VOID) {
         semantic_error(op_line, "operador '%s' não se aplica a operando void", op);
@@ -235,16 +142,10 @@ static Node *binop_node(Node *lhs, const char *op_tok, const char *op, int op_li
         semantic_error(op_line, "operador '%s' exige operandos inteiros (recebeu %s e %s)",
                        op, type_to_c(lt), type_to_c(rt));
     } else {
-        operand = type_promote(lt, rt);
-        res = (kind == OPK_ARITH || kind == OPK_INT) ? operand : TYPE_INT;
-        if (kind == OPK_LOGIC) operand = TYPE_NONE;
+        res = (kind == OPK_ARITH || kind == OPK_INT) ? type_promote(lt, rt) : TYPE_INT;
     }
 
-    char *l = coerce(lhs, operand), *r = coerce(rhs, operand);
-    char *code = (kind == OPK_CMP ? cmp_expr : binop_expr)(l, op, r);
-    free(l);
-    free(r);
-    Node *n = mk("expr", lhs->line, code, lhs, tok(op_tok, op_line), rhs, NULL);
+    Node *n = mk("expr", lhs->line, lhs, tok(op_tok, op_line), rhs, NULL);
     n->type = res;
     return opt_expr(n);
 }
@@ -334,26 +235,20 @@ static DataType unary_type(const Node *operand, const char *op, int line, DataTy
    nao fecha (scope_exit no global nao faz nada) */
 program:
     function_list {
-        parse_root = mk("program", @1.first_line, NULL, $1, NULL);
+        parse_root = mk("program", @1.first_line, $1, NULL);
         /* com o programa inteiro lido, todas as funcoes ja estao na tabela */
         semantic_check_calls();
         semantic_resolve_types(parse_root);
-        /* o Rust so sai quando nenhuma flag de analise esta ligada
-           (--tree, --dot, --symtab): a saida e a analise, nao o codigo.
-           Programa com erro lexico ou semantico e invalido e tambem nao
-           gera Rust */
-        if (emit_code && lexical_errors == 0 && semantic_errors == 0) printf("%s", $1->code);
+        /* o Rust sai depois, pelo codegen_rust no main */
     }
 ;
 
 function_list:
     function {
-        $$ = mk("function_list", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("function_list", @1.first_line, $1, NULL);
     }
     | function_list function {
-        char *buf = malloc(strlen($1->code) + strlen($2->code) + 2);
-        sprintf(buf, "%s\n%s", $1->code, $2->code);
-        $$ = mk("function_list", @1.first_line, buf, $1, $2, NULL);
+        $$ = mk("function_list", @1.first_line, $1, $2, NULL);
     }
 ;
 
@@ -378,10 +273,7 @@ function:
     }
     LBRACE statement_list RBRACE {
         scope_exit();
-        const char *ret_type = $1->code;
-        char *buf = malloc(strlen($2.s_val) + strlen($5->code) + strlen(ret_type) + strlen($9->code) + 32);
-        sprintf(buf, "fn %s(%s) -> %s {\n%s}\n", $2.s_val, $5->code, ret_type, $9->code);
-        $$ = mk("function", @1.first_line, buf,
+        $$ = mk("function", @1.first_line,
                 $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
                 $5, tok("RPAREN", @6.first_line), tok("LBRACE", @8.first_line),
                 $9, tok("RBRACE", @10.first_line), NULL);
@@ -390,23 +282,19 @@ function:
 
 opt_param_list:
     param_list {
-        $$ = mk("opt_param_list", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("opt_param_list", @1.first_line, $1, NULL);
     }
     | /* vazio */ {
-        char *buf = malloc(1);
-        buf[0] = '\0';
-        $$ = mk("opt_param_list", @$.first_line, buf, node_leaf("ε", NULL, @$.first_line), NULL);
+        $$ = mk("opt_param_list", @$.first_line, node_leaf("ε", NULL, @$.first_line), NULL);
     }
 ;
 
 param_list:
     param {
-        $$ = mk("param_list", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("param_list", @1.first_line, $1, NULL);
     }
     | param_list ',' param {
-        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
-        sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("param_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
+        $$ = mk("param_list", @1.first_line, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
@@ -421,10 +309,7 @@ param:
         }
         /* o repetido conta na aridade mesmo assim: f(int a, int a) recebe 2 */
         func_param_add(current_decl_type);
-        const char *t = $1->code;
-        char *buf = malloc(strlen($2.s_val) + strlen(t) + 4);
-        sprintf(buf, "%s: %s", $2.s_val, t);
-        $$ = mk("param", @1.first_line, buf, $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), NULL);
+        $$ = mk("param", @1.first_line, $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), NULL);
     }
 ;
 
@@ -432,55 +317,45 @@ type_specifier:
     TYPE_KW {
         /* reduzido antes de declarator_list, entao ja vale pra declaracao */
         current_decl_type = $1;
-        $$ = mk("type_specifier", @1.first_line, strdup(type_to_rust($1)),
+        $$ = mk("type_specifier", @1.first_line,
                 node_leaf("TYPE_KW", type_to_c($1), @1.first_line), NULL);
     }
 ;
 
 statement_list:
     statement {
-        $$ = mk("statement_list", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("statement_list", @1.first_line, $1, NULL);
     }
     | statement_list statement {
-        char *buf = malloc(strlen($1->code) + strlen($2->code) + 1);
-        sprintf(buf, "%s%s", $1->code, $2->code);
-        $$ = mk("statement_list", @1.first_line, buf, $1, $2, NULL);
+        $$ = mk("statement_list", @1.first_line, $1, $2, NULL);
     }
 ;
 
 statement:
     type_specifier declarator_list SEMICOLON {
-        /* o Rust da declaracao e o dos declarators (um `let mut` por variavel) */
-        $$ = mk("statement", @1.first_line, strdup($2->code),
+        $$ = mk("statement", @1.first_line,
                 $1, $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr SEMICOLON {
         DataType target = check_var_use($1.s_val, @1.first_line);
-        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
-        char *buf = format_str("    %s = %s;\n", $1.s_val, val);
-        free(val);
-        $$ = mk("statement", @1.first_line, buf,
+        check_value($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        $$ = mk("statement", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line),
                 $3, tok("SEMICOLON", @4.first_line), NULL);
     }
     | RETURN expr SEMICOLON {
-        char *val;
         if (current_func_ret == TYPE_VOID) {
             if ($2->type != TYPE_ERROR)
                 semantic_error(@1.first_line, "função '%s' é void e não pode retornar valor", current_func_name);
-            val = strdup($2->code);
         } else {
-            val = convert_to($2, current_func_ret, @1.first_line, "'return' com valor void em '%s'", current_func_name);
+            check_value($2, current_func_ret, @1.first_line, "'return' com valor void em '%s'", current_func_name);
         }
-        char *buf = format_str("    return %s;\n", val);
-        free(val);
-        $$ = mk("statement", @1.first_line, buf,
+        $$ = mk("statement", @1.first_line,
                 tok("RETURN", @1.first_line), $2, tok("SEMICOLON", @3.first_line), NULL);
     }
     | IF LPAREN expr RPAREN statement %prec IFX {
         check_cond($3, @1.first_line, "if");
         $$ = mk("statement", @1.first_line,
-                format_str("    if %s {\n%s    }\n", $3->code, $5->code),
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, NULL);
     }
@@ -488,14 +363,12 @@ statement:
         /* o ELSE fica no mesmo no do IF mais proximo (dangling-else) */
         check_cond($3, @1.first_line, "if");
         $$ = mk("statement", @1.first_line,
-                format_str("    if %s {\n%s    } else {\n%s    }\n", $3->code, $5->code, $7->code),
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, tok("ELSE", @6.first_line), $7, NULL);
     }
     | WHILE LPAREN expr RPAREN statement {
         check_cond($3, @1.first_line, "while");
         $$ = mk("statement", @1.first_line,
-                format_str("    while %s {\n%s    }\n", $3->code, $5->code),
                 tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, NULL);
     }
@@ -505,8 +378,6 @@ statement:
     | FOR LPAREN { scope_enter(); } for_init SEMICOLON for_cond SEMICOLON for_incr RPAREN statement {
         scope_exit();
         $$ = mk("statement", @1.first_line,
-                format_str("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
-                           $4->code, $6->code, $10->code, $8->code),
                 tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $4,
                 tok("SEMICOLON", @5.first_line), $6, tok("SEMICOLON", @7.first_line), $8,
                 tok("RPAREN", @9.first_line), $10, NULL);
@@ -514,22 +385,22 @@ statement:
     /* cada bloco abre um escopo; a acao do meio ocupa o $2 */
     | LBRACE { scope_enter(); } statement_list RBRACE {
         scope_exit();
-        $$ = mk("statement", @1.first_line, format_str("    {\n%s    }\n", $3->code),
+        $$ = mk("statement", @1.first_line,
                 tok("LBRACE", @1.first_line), $3, tok("RBRACE", @4.first_line), NULL);
     }
     | LBRACE RBRACE {
         /* bloco vazio tambem conta como escopo (sem simbolos) */
         scope_enter();
         scope_exit();
-        $$ = mk("statement", @1.first_line, strdup("    {}\n"),
+        $$ = mk("statement", @1.first_line,
                 tok("LBRACE", @1.first_line), tok("RBRACE", @2.first_line), NULL);
     }
     | BREAK SEMICOLON {
-        $$ = mk("statement", @1.first_line, strdup("    break;\n"),
+        $$ = mk("statement", @1.first_line,
                 tok("BREAK", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
     | CONTINUE SEMICOLON {
-        $$ = mk("statement", @1.first_line, strdup("    continue;\n"),
+        $$ = mk("statement", @1.first_line,
                 tok("CONTINUE", @1.first_line), tok("SEMICOLON", @2.first_line), NULL);
     }
 ;
@@ -538,41 +409,37 @@ statement:
    Secao vazia vira o no da secao com um filho ε */
 for_init:
     /* vazio */ {
-        $$ = mk("for_init", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+        $$ = mk("for_init", @$.first_line, node_leaf("ε", NULL, @$.first_line), NULL);
     }
     | type_specifier declarator_list {
-        $$ = mk("for_init", @1.first_line, strdup($2->code), $1, $2, NULL);
+        $$ = mk("for_init", @1.first_line, $1, $2, NULL);
     }
     | IDENTIFIER ASSIGN expr {
         DataType target = check_var_use($1.s_val, @1.first_line);
-        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
-        char *buf = format_str("%s = %s;\n", $1.s_val, val);
-        free(val);
-        $$ = mk("for_init", @1.first_line, buf,
+        check_value($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        $$ = mk("for_init", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
 
 for_cond:
     /* vazio */ {
-        $$ = mk("for_cond", @$.first_line, strdup("true"), node_leaf("ε", NULL, @$.first_line), NULL);
+        $$ = mk("for_cond", @$.first_line, node_leaf("ε", NULL, @$.first_line), NULL);
     }
     | expr {
         check_cond($1, @1.first_line, "for");
-        $$ = mk("for_cond", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("for_cond", @1.first_line, $1, NULL);
     }
 ;
 
 for_incr:
     /* vazio */ {
-        $$ = mk("for_incr", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+        $$ = mk("for_incr", @$.first_line, node_leaf("ε", NULL, @$.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
         DataType target = check_var_use($1.s_val, @1.first_line);
-        char *val = convert_to($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
-        char *buf = format_str("%s = %s;", $1.s_val, val);
-        free(val);
-        $$ = mk("for_incr", @1.first_line, buf,
+        check_value($3, target, @2.first_line, "atribuição de valor void a '%s'", $1.s_val);
+        $$ = mk("for_incr", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
@@ -583,16 +450,14 @@ declarator:
     IDENTIFIER {
         declare_var($1.s_val, @1.first_line);
         $$ = mk("declarator", @1.first_line,
-                format_str("    let mut %s: %s;\n", $1.s_val, type_to_rust(current_decl_type)),
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
     | IDENTIFIER ASSIGN expr {
         declare_var($1.s_val, @1.first_line);
-        /* o tipo declarado vale pro valor: int x = 2.5 converte com cast */
-        char *val = convert_to($3, current_decl_type, @2.first_line, "inicialização de '%s' com valor void", $1.s_val);
-        char *code = format_str("    let mut %s: %s = %s;\n", $1.s_val, type_to_rust(current_decl_type), val);
-        free(val);
-        $$ = mk("declarator", @1.first_line, code,
+        /* o tipo declarado vale pro valor: int x = 2.5 converte (o cast fica
+           com o codegen) */
+        check_value($3, current_decl_type, @2.first_line, "inicialização de '%s' com valor void", $1.s_val);
+        $$ = mk("declarator", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
     }
 ;
@@ -600,42 +465,31 @@ declarator:
 /* recursiva a esquerda: `int a, b, c;` fica aninhada, sem achatar */
 declarator_list:
     declarator {
-        $$ = mk("declarator_list", @1.first_line, strdup($1->code), $1, NULL);
+        $$ = mk("declarator_list", @1.first_line, $1, NULL);
     }
     | declarator_list ',' declarator {
-        $$ = mk("declarator_list", @1.first_line, format_str("%s%s", $1->code, $3->code),
+        $$ = mk("declarator_list", @1.first_line,
                 $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 
 expr:
     INT_NUMBER {
-        char *buf = malloc(32);
-        sprintf(buf, "%d", $1.i_val);
-        $$ = mk("expr", @1.first_line, buf, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
+        $$ = mk("expr", @1.first_line, node_leaf("INT_NUMBER", $1.s_val, @1.first_line), NULL);
         $$->type = TYPE_INT;
     }
     | FLOAT_NUMBER {
-        char *buf = malloc(32);
-        sprintf(buf, "%f", $1.f_val);
-        $$ = mk("expr", @1.first_line, buf, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
+        $$ = mk("expr", @1.first_line, node_leaf("FLOAT_NUMBER", $1.s_val, @1.first_line), NULL);
         $$->type = TYPE_DOUBLE; /* literal sem sufixo e double em C */
     }
     | IDENTIFIER {
         DataType t = check_var_use($1.s_val, @1.first_line);
-        $$ = mk("expr", @1.first_line, strdup($1.s_val), node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
+        $$ = mk("expr", @1.first_line, node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
         $$->type = t;
     }
     | LPAREN expr RPAREN {
-        char *buf;
-        if (is_wrapped($2->code)) {
-            buf = strdup($2->code); /* ex. (a == b) ja vem entre parenteses do cmp_expr */
-        } else {
-            buf = malloc(strlen($2->code) + 3);
-            sprintf(buf, "(%s)", $2->code);
-        }
-        /* a arvore guarda os parenteses como estao no fonte, independente do codegen */
-        $$ = mk("expr", @1.first_line, buf,
+        /* a arvore guarda os parenteses como estao no fonte */
+        $$ = mk("expr", @1.first_line,
                 tok("LPAREN", @1.first_line), $2, tok("RPAREN", @3.first_line), NULL);
         $$->type = $2->type;
         opt_expr($$);
@@ -649,24 +503,14 @@ expr:
         collect_args($3, args, n);
         Symbol *f = symtab_lookup_func($1.s_val);
         DataType rtype = TYPE_UNKNOWN;
-        char *buf;
         if (f) {
-            /* funcao ja definida: o resultado tem o tipo de retorno dela e
-               cada argumento vira o tipo do parametro (com cast se difere).
-               Com a aridade errada (reportada no fim) nao ha como casar */
+            /* funcao ja definida: o resultado tem o tipo de retorno dela (os
+               casts dos argumentos pros tipos dos parametros ficam com o
+               codegen) */
             rtype = f->type;
-            char *list = strdup("");
-            for (int i = 0; i < n; i++) {
+            for (int i = 0; i < n; i++)
                 if (args[i]->type == TYPE_VOID)
                     semantic_error(@1.first_line, "argumento %d de '%s' é void", i + 1, $1.s_val);
-                char *a = coerce(args[i], f->n_params == n ? f->param_types[i] : TYPE_NONE);
-                char *joined = format_str(i ? "%s, %s" : "%s%s", list, a);
-                free(list);
-                free(a);
-                list = joined;
-            }
-            buf = format_str("%s(%s)", $1.s_val, list);
-            free(list);
         } else {
             /* funcao definida mais adiante: tipo do resultado desconhecido, e
                os argumentos so podem ser checados no fim do programa */
@@ -674,10 +518,9 @@ expr:
             for (int i = 0; i < n; i++) types[i] = args[i]->type;
             semantic_call_arg_types(types, n);
             free(types);
-            buf = format_str("%s(%s)", $1.s_val, $3->code);
         }
         free(args);
-        $$ = mk("expr", @1.first_line, buf,
+        $$ = mk("expr", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("LPAREN", @2.first_line),
                 $3, tok("RPAREN", @4.first_line), NULL);
         $$->type = rtype;
@@ -701,15 +544,13 @@ expr:
     | expr LE expr      { $$ = binop_node($1, "LE", "<=", @2.first_line, $3, OPK_CMP); }
     | expr GE expr      { $$ = binop_node($1, "GE", ">=", @2.first_line, $3, OPK_CMP); }
     | NOT expr {
-        $$ = mk("expr", @1.first_line, unop_expr("!", $2->code), tok("NOT", @1.first_line), $2, NULL);
+        $$ = mk("expr", @1.first_line, tok("NOT", @1.first_line), $2, NULL);
         $$->type = unary_type($2, "!", @1.first_line, TYPE_INT);
         opt_expr($$);
     }
     | MINUS expr %prec UMINUS {
         DataType t = unary_type($2, "-", @1.first_line, TYPE_NONE);
-        char *operand = coerce($2, t);
-        $$ = mk("expr", @1.first_line, unop_expr("-", operand), tok("MINUS", @1.first_line), $2, NULL);
-        free(operand);
+        $$ = mk("expr", @1.first_line, tok("MINUS", @1.first_line), $2, NULL);
         $$->type = t;
         opt_expr($$);
     }
@@ -717,18 +558,16 @@ expr:
 
 /* argumentos de uma chamada: f(), f(a) ou f(a, b + 1, g(c)) */
 opt_arg_list:
-    arg_list { $$ = mk("opt_arg_list", @1.first_line, strdup($1->code), $1, NULL); }
+    arg_list { $$ = mk("opt_arg_list", @1.first_line, $1, NULL); }
     | /* vazio */ {
-        $$ = mk("opt_arg_list", @$.first_line, strdup(""), node_leaf("ε", NULL, @$.first_line), NULL);
+        $$ = mk("opt_arg_list", @$.first_line, node_leaf("ε", NULL, @$.first_line), NULL);
     }
 ;
 
 arg_list:
-    expr { $$ = mk("arg_list", @1.first_line, strdup($1->code), $1, NULL); }
+    expr { $$ = mk("arg_list", @1.first_line, $1, NULL); }
     | arg_list ',' expr {
-        char *buf = malloc(strlen($1->code) + strlen($3->code) + 3);
-        sprintf(buf, "%s, %s", $1->code, $3->code);
-        $$ = mk("arg_list", @1.first_line, buf, $1, tok("','", @2.first_line), $3, NULL);
+        $$ = mk("arg_list", @1.first_line, $1, tok("','", @2.first_line), $3, NULL);
     }
 ;
 

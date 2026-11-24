@@ -4,14 +4,18 @@
 #include <stdio.h>
 #include "types.h"
 
-/* No da arvore de derivacao. Cada regra do parser cria um no; o `code`
-   guarda o trecho de Rust ja gerado para aquele no (o codegen atual ainda
-   e dirigido pela sintaxe, entao ele continua vivendo aqui). */
+/* literal criado pelo -O (#49): o Rust dele sai do lexema da folha, e nao
+   do valor como no literal do fonte. FOLD_BOOL e comparacao/logico dobrado,
+   que e 0/1 em C mas bool no Rust gerado */
+enum { FOLD_NONE, FOLD_VALUE, FOLD_BOOL };
+
+/* No da arvore de derivacao. Cada regra do parser cria um no; o Rust sai
+   depois, do percurso da arvore inteira (codegen.c, #54). */
 typedef struct Node {
     const char *label;      /* nao-terminal ou token (literal, nao e copiado) */
     char *text;             /* lexema, so nas folhas (NULL nos demais) */
     int line;               /* linha do fonte onde o no comeca */
-    char *code;             /* trecho de Rust deste no (NULL se nao houver) */
+    int folded;             /* FOLD_* (so nos `expr`), FOLD_NONE nos demais */
     DataType type;          /* tipo da expressao (so nos `expr`), TYPE_NONE nos demais */
     struct Node **children;
     int n_children, cap;
@@ -31,7 +35,7 @@ Node *node_leaf(const char *label, const char *text, int line);
    filho (node_free libera os dois). Ignora child == NULL. */
 void node_add_child(Node *parent, Node *child);
 
-/* libera o no, o text, o code e todos os descendentes (recursivo).
+/* libera o no, o text e todos os descendentes (recursivo).
    Aceita NULL. */
 void node_free(Node *root);
 
