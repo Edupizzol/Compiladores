@@ -433,6 +433,11 @@ static char *gen_for_incr(const Node *n) {
     return gen_assign(n, "%s = %s;");
 }
 
+/* passo do laco mais interno: o do for, ou NULL dentro de um while. O
+   `continue` do Rust pula direto pra condicao, entao num for ele tem que
+   rodar o passo antes (#57) */
+static const char *loop_incr = NULL;
+
 /* `for (init; cond; incr) corpo` vira um bloco com o init e um while com o
    passo no fim. O escopo do for vale pras tres secoes e pro corpo; o incr e
    gerado antes do corpo, na ordem em que o parser lia */
@@ -441,7 +446,10 @@ static char *gen_for(const Node *s) {
     char *init = gen_for_init(s->children[2]);
     char *cond = gen_for_cond(s->children[4]);
     char *incr = gen_for_incr(s->children[6]);
+    const char *outer = loop_incr;
+    loop_incr = incr;
     char *body = gen_stmt(s->children[8]);
+    loop_incr = outer;
     scope_pop(mark);
     char *buf = xfmt("    {\n%s        while %s {\n%s            %s\n        }\n    }\n",
                      init, cond, body, incr);
@@ -455,7 +463,11 @@ static char *gen_for(const Node *s) {
 /* `if`/`while`: `cond` e o corpo, com o `else` opcional */
 static char *gen_if_while(const Node *s, const char *kw) {
     char *cond = gen_cond(s->children[2]);
+    /* o corpo do while e um laco novo: o continue dele nao tem passo */
+    const char *outer = loop_incr;
+    if (strcmp(kw, "while") == 0) loop_incr = NULL;
     char *then = gen_stmt(s->children[4]);
+    loop_incr = outer;
     char *buf;
     if (s->n_children == 7) {
         char *els = gen_stmt(s->children[6]);
@@ -505,6 +517,7 @@ static char *gen_stmt(const Node *s) {
         return buf;
     }
     if (strcmp(k, "BREAK") == 0) return strdup("    break;\n");
+    if (loop_incr && *loop_incr) return xfmt("    %s\n    continue;\n", loop_incr);
     return strdup("    continue;\n");
 }
 
