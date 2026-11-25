@@ -470,6 +470,8 @@ static char *gen_if_while(const Node *s, const char *kw) {
 }
 
 static char *gen_stmt(const Node *s) {
+    /* comando apagado pelo -O (#51): nao sai nada */
+    if (s->folded == FOLD_DEAD) return strdup("");
     const Node *first = s->children[0];
     const char *k = first->label;
 

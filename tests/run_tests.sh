@@ -12,6 +12,10 @@
 #   .tac     -> --tac,    compara o stdout (o codigo de tres enderecos)
 #   .err     -> sem flag, espera exit code != 0 e compara o stderr
 #
+# Com `.opt` antes da extensao, o caso roda com a otimizacao ligada (-O,
+# issue #53): expected/<nome>.opt.rs roda `-O` em inputs/<nome>.c, e
+# expected/<nome>.opt.tac roda `-O --tac`. Vale pra todas as extensoes.
+#
 # Sai com codigo 0 se todos passarem, != 0 se algum falhar.
 
 set -u
@@ -56,6 +60,13 @@ for expected in "$EXPECTED_DIR"/*; do
     ext="${name##*.}"
     [ "$base" = "$name" ] && continue   # sem extensao: ignora
 
+    # <nome>.opt.<ext>: mesmo input, com -O
+    opt=""
+    if [ "${base%.opt}" != "$base" ]; then
+        base="${base%.opt}"
+        opt="-O"
+    fi
+
     input="$INPUT_DIR/$base.c"
     if [ ! -f "$input" ]; then
         echo "FALHA  $name  (input correspondente nao encontrado: $input)"
@@ -64,7 +75,7 @@ for expected in "$EXPECTED_DIR"/*; do
         continue
     fi
 
-    flag=$(flag_for ".$ext")
+    flag="$opt $(flag_for ".$ext")"
     actual=$(mktemp)
     expected_file=$(mktemp)
 
