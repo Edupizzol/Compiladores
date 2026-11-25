@@ -313,7 +313,7 @@ void fold_constants(Node *e) {
     }
 }
 
-/* s adota os filhos e o rust de keep (um filho de s); os outros filhos saem */
+/* s adota os filhos de keep (um filho de s); os outros filhos saem */
 static void adopt_statement(Node *s, Node *keep) {
     for (int i = 0; i < s->n_children; i++)
         if (s->children[i] != keep) node_free(s->children[i]);
@@ -321,21 +321,20 @@ static void adopt_statement(Node *s, Node *keep) {
     s->children = keep->children;
     s->n_children = keep->n_children;
     s->cap = keep->cap;
-    free(s->code);
-    s->code = keep->code;
+    s->folded = keep->folded;   /* o ramo que fica pode ja ter sido apagado */
     free(keep->text);
     free(keep);
 }
 
-/* o statement some: vira um bloco vazio na arvore e fica sem rust */
+/* o statement some: vira um bloco vazio na arvore, marcado com FOLD_DEAD pra
+   o codegen nao imprimir nada (um `{ }` do fonte continua saindo `{}`) */
 static void make_empty(Node *s) {
     for (int i = 0; i < s->n_children; i++)
         node_free(s->children[i]);
     s->n_children = 0;
     node_add_child(s, node_leaf("LBRACE", NULL, s->line));
     node_add_child(s, node_leaf("RBRACE", NULL, s->line));
-    free(s->code);
-    s->code = strdup("");
+    s->folded = FOLD_DEAD;
 }
 
 static void dead_if(Node *s) {
@@ -370,14 +369,10 @@ static void dead_for(Node *s) {
     if (init->n_children == 1) { make_empty(s); return; }
 
     Node *st = node_new("statement", init->line);
-    size_t n = strlen(init->code) + 8;
-    st->code = malloc(n);
     if (init->n_children == 2) {
-        snprintf(st->code, n, "%s", init->code);
         node_add_child(st, init->children[0]);
         node_add_child(st, init->children[1]);
     } else {
-        snprintf(st->code, n, "    %s", init->code);
         node_add_child(st, init->children[0]);
         node_add_child(st, init->children[1]);
         node_add_child(st, init->children[2]);
@@ -386,12 +381,7 @@ static void dead_for(Node *s) {
     init->n_children = 0;
 
     Node *list = node_new("statement_list", init->line);
-    list->code = strdup(st->code);
     node_add_child(list, st);
-
-    size_t m = strlen(list->code) + 16;
-    char *code = malloc(m);
-    snprintf(code, m, "    {\n%s    }\n", list->code);
 
     for (int i = 0; i < s->n_children; i++)
         node_free(s->children[i]);
@@ -399,8 +389,6 @@ static void dead_for(Node *s) {
     node_add_child(s, node_leaf("LBRACE", NULL, s->line));
     node_add_child(s, list);
     node_add_child(s, node_leaf("RBRACE", NULL, s->line));
-    free(s->code);
-    s->code = code;
 }
 
 void eliminate_dead_code(Node *s) {
@@ -416,12 +404,12 @@ static int is_jump(const Node *st) {
     return strcmp(f, "RETURN") == 0 || strcmp(f, "BREAK") == 0 || strcmp(f, "CONTINUE") == 0;
 }
 
-/* a lista termina em return/break/continue? um comando ja apagado (code
-   vazio) nao conta: olha o anterior */
+/* a lista termina em return/break/continue? um comando ja apagado
+   (FOLD_DEAD) nao conta: olha o anterior */
 static int ends_with_jump(const Node *list) {
     const Node *last = list->children[list->n_children - 1];
     if (is_jump(last)) return 1;
-    if (last->code[0] == '\0' && list->n_children == 2)
+    if (last->folded == FOLD_DEAD && list->n_children == 2)
         return ends_with_jump(list->children[0]);
     return 0;
 }
