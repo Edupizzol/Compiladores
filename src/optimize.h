@@ -3,6 +3,18 @@
 
 #include "ast.h"
 
+/* Ordem dos passes com -O (#53). E fixa e sai da propria ordem do parse:
+
+   1. fold_constants      em cada expr que reduz (pos-ordem)
+   2. simplify_algebraic  na mesma expr, logo depois do folding
+   3. eliminate_dead_code em cada statement que reduz, quando as expr dele
+      ja foram dobradas (e o folding que transforma `if (2 > 3)` em `if (0)`)
+      e drop_after_jump em cada statement_list
+   4. tac_optimize (tac_opt.h), so com --tac, em cima do TAC ja gerado da
+      arvore otimizada
+
+   Sem -O nenhum passe roda e a saida e a mesma de antes. */
+
 /* constant folding (#49). Se os operandos da expressao `e` sao literais,
    troca a subarvore por um unico literal com o resultado, ja com o Rust
    (`e->code`) e o tipo certos: `2 + 3` vira `expr -> INT_NUMBER (5)`.
