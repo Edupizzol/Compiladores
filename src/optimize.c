@@ -312,3 +312,120 @@ void fold_constants(Node *e) {
         fold_binary(e);
     }
 }
+
+/* s adota os filhos e o rust de keep (um filho de s); os outros filhos saem */
+static void adopt_statement(Node *s, Node *keep) {
+    for (int i = 0; i < s->n_children; i++)
+        if (s->children[i] != keep) node_free(s->children[i]);
+    free(s->children);
+    s->children = keep->children;
+    s->n_children = keep->n_children;
+    s->cap = keep->cap;
+    free(s->code);
+    s->code = keep->code;
+    free(keep->text);
+    free(keep);
+}
+
+/* o statement some: vira um bloco vazio na arvore e fica sem rust */
+static void make_empty(Node *s) {
+    for (int i = 0; i < s->n_children; i++)
+        node_free(s->children[i]);
+    s->n_children = 0;
+    node_add_child(s, node_leaf("LBRACE", NULL, s->line));
+    node_add_child(s, node_leaf("RBRACE", NULL, s->line));
+    free(s->code);
+    s->code = strdup("");
+}
+
+static void dead_if(Node *s) {
+    Lit v;
+    if (!literal_value(s->children[2], &v)) return;
+    int has_else = s->n_children == 7;
+    Node *then_st = s->children[4];
+    Node *else_st = has_else ? s->children[6] : NULL;
+    Node *keep = is_true(v) ? then_st : else_st;
+
+    if (!keep) { make_empty(s); return; }
+    /* declaracao solta como ramo: desembrulhar tiraria o escopo dela */
+    if (strcmp(keep->children[0]->label, "type_specifier") == 0) return;
+    adopt_statement(s, keep);
+}
+
+static int cond_is_false(const Node *cond) {
+    Lit v;
+    return literal_value(cond, &v) && !is_true(v);
+}
+
+static void dead_while(Node *s) {
+    if (cond_is_false(s->children[2])) make_empty(s);
+}
+
+/* for com condicao falsa: o corpo e o incremento somem, o init fica
+   (pode ter efeito colateral) dentro de um bloco, pra manter o escopo */
+static void dead_for(Node *s) {
+    Node *init = s->children[2], *cond = s->children[4];
+    if (strcmp(cond->children[0]->label, "expr") != 0) return;
+    if (!cond_is_false(cond->children[0])) return;
+    if (init->n_children == 1) { make_empty(s); return; }
+
+    Node *st = node_new("statement", init->line);
+    size_t n = strlen(init->code) + 8;
+    st->code = malloc(n);
+    if (init->n_children == 2) {
+        snprintf(st->code, n, "%s", init->code);
+        node_add_child(st, init->children[0]);
+        node_add_child(st, init->children[1]);
+    } else {
+        snprintf(st->code, n, "    %s", init->code);
+        node_add_child(st, init->children[0]);
+        node_add_child(st, init->children[1]);
+        node_add_child(st, init->children[2]);
+    }
+    node_add_child(st, node_leaf("SEMICOLON", NULL, init->line));
+    init->n_children = 0;
+
+    Node *list = node_new("statement_list", init->line);
+    list->code = strdup(st->code);
+    node_add_child(list, st);
+
+    size_t m = strlen(list->code) + 16;
+    char *code = malloc(m);
+    snprintf(code, m, "    {\n%s    }\n", list->code);
+
+    for (int i = 0; i < s->n_children; i++)
+        node_free(s->children[i]);
+    s->n_children = 0;
+    node_add_child(s, node_leaf("LBRACE", NULL, s->line));
+    node_add_child(s, list);
+    node_add_child(s, node_leaf("RBRACE", NULL, s->line));
+    free(s->code);
+    s->code = code;
+}
+
+void eliminate_dead_code(Node *s) {
+    if (!s || strcmp(s->label, "statement") != 0) return;
+    const char *first = s->children[0]->label;
+    if (strcmp(first, "IF") == 0) dead_if(s);
+    else if (strcmp(first, "WHILE") == 0) dead_while(s);
+    else if (strcmp(first, "FOR") == 0) dead_for(s);
+}
+
+static int is_jump(const Node *st) {
+    const char *f = st->children[0]->label;
+    return strcmp(f, "RETURN") == 0 || strcmp(f, "BREAK") == 0 || strcmp(f, "CONTINUE") == 0;
+}
+
+/* a lista termina em return/break/continue? um comando ja apagado (code
+   vazio) nao conta: olha o anterior */
+static int ends_with_jump(const Node *list) {
+    const Node *last = list->children[list->n_children - 1];
+    if (is_jump(last)) return 1;
+    if (last->code[0] == '\0' && list->n_children == 2)
+        return ends_with_jump(list->children[0]);
+    return 0;
+}
+
+void drop_after_jump(const Node *list, Node *s) {
+    if (ends_with_jump(list)) make_empty(s);
+}

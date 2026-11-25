@@ -102,6 +102,13 @@ static Node *opt_expr(Node *n) {
     return n;
 }
 
+/* com -O, tira o codigo morto do statement recem-criado (#51) */
+static Node *opt_stmt(Node *n) {
+    if (g_options & OPT_OPTIMIZE)
+        eliminate_dead_code(n);
+    return n;
+}
+
 /* ---- tipos (#44) ---- */
 
 /* tipo "silencioso": erro ja reportado ou ainda desconhecido, nao gera
@@ -330,6 +337,7 @@ statement_list:
         $$ = mk("statement_list", @1.first_line, $1, NULL);
     }
     | statement_list statement {
+        if (g_options & OPT_OPTIMIZE) drop_after_jump($1, $2);
         $$ = mk("statement_list", @1.first_line, $1, $2, NULL);
     }
 ;
@@ -361,6 +369,7 @@ statement:
         $$ = mk("statement", @1.first_line,
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, NULL);
+        opt_stmt($$);
     }
     | IF LPAREN expr RPAREN statement ELSE statement {
         /* o ELSE fica no mesmo no do IF mais proximo (dangling-else) */
@@ -368,12 +377,14 @@ statement:
         $$ = mk("statement", @1.first_line,
                 tok("IF", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, tok("ELSE", @6.first_line), $7, NULL);
+        opt_stmt($$);
     }
     | WHILE LPAREN expr RPAREN statement {
         check_cond($3, @1.first_line, "while");
         $$ = mk("statement", @1.first_line,
                 tok("WHILE", @1.first_line), tok("LPAREN", @2.first_line), $3,
                 tok("RPAREN", @4.first_line), $5, NULL);
+        opt_stmt($$);
     }
     /* o for tem escopo proprio, aberto antes do for_init, pra que o `i` de
        `for (int i = 0; ...)` nao vaze pro resto da funcao. A acao do meio
@@ -384,6 +395,7 @@ statement:
                 tok("FOR", @1.first_line), tok("LPAREN", @2.first_line), $4,
                 tok("SEMICOLON", @5.first_line), $6, tok("SEMICOLON", @7.first_line), $8,
                 tok("RPAREN", @9.first_line), $10, NULL);
+        opt_stmt($$);
     }
     /* cada bloco abre um escopo; a acao do meio ocupa o $2 */
     | LBRACE { scope_enter(); } statement_list RBRACE {
