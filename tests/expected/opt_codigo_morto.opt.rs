@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() {
     let mut x: i32 = 0;
     {
     x = 2;
@@ -16,5 +16,5 @@ fn main() -> i32 {
     break;
     }
     }
-    return x;
+    std::process::exit(x);
 }

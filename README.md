@@ -53,7 +53,7 @@ Os arquivos gerados por bison/flex (`parser.tab.c`, `parser.tab.h`,
 ```
 src/
   lexer.l        # regras léxicas (flex); preenche yylloc pra linha de cada token
-  parser.y       # gramática; as ações montam a árvore, a tabela e o Rust
+  parser.y       # gramática; as ações montam a árvore e a tabela e checam os tipos
   ast.h/.c       # Node da árvore, construção/liberação, tree_print e tree_to_dot
   symtab.h/.c    # tabela de símbolos: hash por nome, pilha e histórico de escopos
   symtab_dump.h/.c # formatação da tabela pro --symtab
@@ -62,7 +62,7 @@ src/
   tac_opt.h/.c   # otimização do TAC com -O (propagação e temporários mortos)
   types.h        # DataType, ValueData, type_to_rust() e type_to_c()
   options.h      # flags de CLI (OPT_*) e o switch emit_code
-  codegen.h      # reservado para separar o codegen do parser (vazio)
+  codegen.h/.c   # gera o Rust a partir da árvore anotada
   main.c         # CLI: lê as flags, roda o parser e imprime o que foi pedido
 tests/inputs/        # arquivos .c de entrada
 tests/expected/      # saída esperada de cada input (.rs, .tree, .dot, .symtab, .err)
@@ -169,12 +169,21 @@ assinatura (`int (void)` quando não têm parâmetros).
 | chamada de função inexistente | `função 'g' não declarada` |
 | número de argumentos errado | `função 'f' espera 1 argumento(s), mas recebeu 2` |
 | nome de função usado como variável | `'f' é uma função, não uma variável` |
+| variável lida no próprio inicializador (`int x = x;`) | `variável 'x' usada na própria inicialização` |
+| função não `void` que pode chegar ao fim sem `return` | `função 'f' pode chegar ao fim sem return` |
 
 Todas saem em stderr no formato do erro sintático: `Erro semântico na linha
 N: <mensagem>`. Os erros não param o parse, e todos saem no fim, ordenados
 por linha. Programa com erro semântico não gera Rust e sai com exit code 1,
 mas o `--tree` e o `--symtab` ainda imprimem a árvore e a tabela, o que
 ajuda a depurar.
+
+Como em C, a variável existe a partir do nome: em `int x = x;` o `x` da
+direita já é a variável nova, mesmo com outro `x` visível de fora, e ela
+ainda não tem valor. A checagem do `return` segue a regra do Rust: vale um
+`return` no próprio bloco, um bloco `{ }` que sempre retorna ou um `if/else`
+com `return` nos dois lados. Laço não conta, e o `main` fica de fora (em C
+ele devolve 0 se chegar ao fim).
 
 Como a gramática não tem protótipos, as chamadas de função são checadas só
 no fim do programa. Assim, chamar uma função definida mais abaixo no arquivo
@@ -207,7 +216,22 @@ Uma chamada a função definida **depois** do uso não tem o tipo conhecido
 enquanto o parser lê a expressão. No fim do programa a árvore é percorrida de
 novo e esses tipos são resolvidos (por isso o `--types` e o TAC saem certos),
 mas os erros de tipo *dentro* dessas expressões não são checados: só os
-argumentos `void` e a aridade. O Rust gerado também fica sem os casts delas.
+argumentos `void` e a aridade. O Rust gerado usa a assinatura completa, então
+os casts saem certos.
+
+### Rust que compila
+
+O codegen (`src/codegen.c`) cuida das diferenças que fariam o `rustc`
+recusar o código:
+
+- comparação, `&&`, `||` e `!` dão `bool` no Rust. Usados como número, viram
+  `((a < b) as i32)`; numa condição, ficam como estão;
+- número como condição (`if (x)`, `while (n)`, lado de `&&`/`||`) vira
+  `(x != 0)` (`0.0` para float/double). O `!x` de um número vira `(x == 0)`,
+  porque o `!` do Rust num inteiro inverte os bits;
+- o `main` do Rust não devolve valor: `int main()` vira `fn main()`, e o
+  `return v;` dele vira `std::process::exit(v);`. Programa sem `main` ganha um
+  `fn main() {}` vazio.
 
 ## Código de três endereços (TAC)
 
@@ -317,6 +341,8 @@ chamando `f()` (`tests/inputs/opt_sem_folding.c`).
 - Checagem de tipos das expressões (a tabela guarda os tipos, mas `int x =
   2.5;` não é erro).
 - Protótipos de função.
+- Variável lida antes de receber valor (`int x; return x;`): é válido em C,
+  mas o `rustc` recusa (E0381).
 
 ## Testando
 
@@ -332,6 +358,9 @@ chamando `f()` (`tests/inputs/opt_sem_folding.c`).
 - `symtab_basico.c` e `simbolos_*.c`: escopos, sombreamento, recursão e
   função definida depois;
 - `erro_*.c`: um erro semântico por arquivo;
+- `rust_*.c`: os casos em que o Rust gerado precisa de ajuste pra compilar
+  (bool como valor, número como condição, `main`, programa sem `main` e
+  chamada adiantada).
 - `opt_*.c`: os casos do `-O` (folding da semana 9, o que não pode dobrar,
   código morto e propagação no TAC).
 

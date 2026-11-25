@@ -9,6 +9,23 @@
 
 int semantic_errors = 0;
 
+static int stmt_returns(const Node *s) {
+    const char *first = s->children[0]->label;
+    if (strcmp(first, "RETURN") == 0) return 1;
+    if (strcmp(first, "IF") == 0)
+        return s->n_children == 7 && stmt_returns(s->children[4]) && stmt_returns(s->children[6]);
+    if (strcmp(first, "LBRACE") == 0)
+        return s->n_children == 3 && semantic_always_returns(s->children[1]);
+    return 0;
+}
+
+/* qualquer comando do bloco que sempre retorna basta: o que vem depois nao
+   e alcancado */
+int semantic_always_returns(const Node *list) {
+    if (list->n_children == 1) return stmt_returns(list->children[0]);
+    return semantic_always_returns(list->children[0]) || stmt_returns(list->children[1]);
+}
+
 int type_is_numeric(DataType t) {
     return t == TYPE_INT || t == TYPE_FLOAT || t == TYPE_DOUBLE || t == TYPE_CHAR;
 }

@@ -1,0 +1,2 @@
+Erro semântico na linha 16: função 'sem_else' pode chegar ao fim sem return
+Erro semântico na linha 22: função 'laco' pode chegar ao fim sem return

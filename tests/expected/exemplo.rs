@@ -3,9 +3,9 @@ fn soma(a: i32, b: i32) -> i32 {
     return res;
 }
 
-fn main() -> i32 {
+fn main() {
     let mut x: i32 = 10;
     let mut y: i32 = 20;
     let mut total: i32 = 0;
-    return total;
+    std::process::exit(total);
 }

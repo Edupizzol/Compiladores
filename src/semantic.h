@@ -21,6 +21,12 @@ DataType type_promote(DataType a, DataType b);
 struct Node;
 void semantic_resolve_types(struct Node *root);
 
+/* 1 se o statement_list sempre termina num return, pela regra do Rust: um
+   `return` no proprio bloco, um bloco `{ }` que sempre retorna ou um
+   if/else em que os dois lados sempre retornam. Lacos nao contam (o
+   `while` do Rust nao garante o return) */
+int semantic_always_returns(const struct Node *statement_list);
+
 /* quantos erros semanticos o parse encontrou ate agora */
 extern int semantic_errors;
 

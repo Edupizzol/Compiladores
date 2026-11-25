@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() {
     let mut a: i32 = 3;
     let mut b: i32 = a + 4;
     let mut c: i32 = b;
@@ -8,5 +8,5 @@ fn main() -> i32 {
     d = d - b;
     }
     }
-    return d + c;
+    std::process::exit(d + c);
 }
