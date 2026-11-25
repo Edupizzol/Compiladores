@@ -57,6 +57,7 @@ src/
   symtab_dump.h/.c # formatação da tabela pro --symtab
   semantic.h/.c  # semantic_error(), a checagem das chamadas e as regras de tipo
   tac.h/.c       # gerador de código de três endereços (--tac)
+  tac_opt.h/.c   # otimização do TAC com -O (propagação e temporários mortos)
   types.h        # DataType, ValueData, type_to_rust() e type_to_c()
   options.h      # flags de CLI (OPT_*) e o switch emit_code
   codegen.h      # reservado para separar o codegen do parser (vazio)
@@ -231,6 +232,30 @@ x = t1
   saltam pro fim e pro próximo passo do laço (no `for`, a atualização).
 - Variáveis de mesmo nome em escopos aninhados ganham um sufixo (`x` e
   `x.1`), porque o TAC não tem escopos.
+
+### TAC otimizado (`--tac -O`)
+
+Com `-O`, o TAC passa por `src/tac_opt.c` antes de sair. Cada função é
+otimizada sozinha:
+
+1. rótulo que nenhum salto usa sai, o que junta blocos básicos;
+2. dentro de cada bloco básico (trecho sem rótulo, sem salto e sem `call`),
+   propagação de constantes e de cópias. Só a aritmética inteira é dobrada,
+   com as regras do constant folding da árvore (nada de divisão por zero,
+   overflow ou shift fora de 0..31);
+3. temporário que ninguém lê é removido (`call` nunca sai);
+4. temporários e rótulos são renumerados em ordem.
+
+`int a = 3; int b = a + 4; return b;` fica:
+
+```
+a = 3
+b = 7
+return 7
+```
+
+A propagação não passa de um bloco básico para outro. Sem `-O`, o TAC
+continua o mesmo.
 
 ## O que já funciona
 
