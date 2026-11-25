@@ -280,12 +280,30 @@ static char *gen_literal(const Node *e) {
     return xfmt("%f", atof(leaf->text));
 }
 
+static Expr gen_expr_inner(const Node *e);
+
+/* o Rust da expressao, com o tipo da arvore. O conteudo tem o tipo dele (a
+   variavel, o operador, a funcao); sem -O e sempre o da arvore. Com -O, a
+   simplificacao (#50) pode trocar `x + 0.0` pelo `x` e deixar o no com o
+   tipo double e o conteudo int: ai entra o cast, `(x as f64)` */
 static Expr gen_expr(const Node *e) {
+    Expr x = gen_expr_inner(e);
+    if (type_is_numeric(x.type) && type_is_numeric(e->type) && x.type != e->type) {
+        x.code = coerce(x, e, e->type);
+        x.type = e->type;
+    }
+    return x;
+}
+
+static Expr gen_expr_inner(const Node *e) {
     int n = e->n_children;
 
     if (n == 1) {
         const Node *leaf = e->children[0];
-        if (label_is(leaf, "IDENTIFIER")) return (Expr){strdup(leaf->text), e->type};
+        if (label_is(leaf, "IDENTIFIER")) {
+            DataType t = var_type(leaf->text);
+            return (Expr){strdup(leaf->text), t == TYPE_ERROR ? e->type : t};
+        }
         return (Expr){gen_literal(e), e->type};
     }
     if (n == 4) return gen_call(e);
