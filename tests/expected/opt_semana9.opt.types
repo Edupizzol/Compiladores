@@ -1,0 +1,78 @@
+program
+└── function_list
+    └── function
+        ├── type_specifier
+        │   └── TYPE_KW (int)
+        ├── IDENTIFIER (main)
+        ├── LPAREN
+        ├── opt_param_list
+        │   └── ε
+        ├── RPAREN
+        ├── LBRACE
+        ├── statement_list
+        │   ├── statement_list
+        │   │   ├── statement_list
+        │   │   │   ├── statement_list
+        │   │   │   │   ├── statement_list
+        │   │   │   │   │   └── statement
+        │   │   │   │   │       ├── type_specifier
+        │   │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │   │       ├── declarator_list
+        │   │   │   │   │       │   └── declarator
+        │   │   │   │   │       │       ├── IDENTIFIER (x)
+        │   │   │   │   │       │       ├── ASSIGN
+        │   │   │   │   │       │       └── expr [int]
+        │   │   │   │   │       │           └── INT_NUMBER (3)
+        │   │   │   │   │       └── SEMICOLON
+        │   │   │   │   └── statement
+        │   │   │   │       ├── type_specifier
+        │   │   │   │       │   └── TYPE_KW (int)
+        │   │   │   │       ├── declarator_list
+        │   │   │   │       │   └── declarator
+        │   │   │   │       │       ├── IDENTIFIER (a)
+        │   │   │   │       │       ├── ASSIGN
+        │   │   │   │       │       └── expr [int]
+        │   │   │   │       │           └── INT_NUMBER (14)
+        │   │   │   │       └── SEMICOLON
+        │   │   │   └── statement
+        │   │   │       ├── type_specifier
+        │   │   │       │   └── TYPE_KW (int)
+        │   │   │       ├── declarator_list
+        │   │   │       │   └── declarator
+        │   │   │       │       ├── IDENTIFIER (b)
+        │   │   │       │       ├── ASSIGN
+        │   │   │       │       └── expr [int]
+        │   │   │       │           ├── expr [int]
+        │   │   │       │           │   └── INT_NUMBER (5)
+        │   │   │       │           ├── PLUS
+        │   │   │       │           └── expr [int]
+        │   │   │       │               ├── expr [int]
+        │   │   │       │               │   └── IDENTIFIER (x)
+        │   │   │       │               ├── STAR
+        │   │   │       │               └── expr [int]
+        │   │   │       │                   └── INT_NUMBER (4)
+        │   │   │       └── SEMICOLON
+        │   │   └── statement
+        │   │       ├── type_specifier
+        │   │       │   └── TYPE_KW (int)
+        │   │       ├── declarator_list
+        │   │       │   └── declarator
+        │   │       │       ├── IDENTIFIER (c)
+        │   │       │       ├── ASSIGN
+        │   │       │       └── expr [int]
+        │   │       │           └── INT_NUMBER (21)
+        │   │       └── SEMICOLON
+        │   └── statement
+        │       ├── RETURN
+        │       ├── expr [int]
+        │       │   ├── expr [int]
+        │       │   │   ├── expr [int]
+        │       │   │   │   └── IDENTIFIER (a)
+        │       │   │   ├── PLUS
+        │       │   │   └── expr [int]
+        │       │   │       └── IDENTIFIER (b)
+        │       │   ├── PLUS
+        │       │   └── expr [int]
+        │       │       └── IDENTIFIER (c)
+        │       └── SEMICOLON
+        └── RBRACE
