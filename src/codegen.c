@@ -57,30 +57,8 @@ static DataType var_type(const char *name) {
     return TYPE_ERROR;
 }
 
-/* ---- funcoes ja definidas ----
-   Uma funcao entra na tabela depois do `)` dela, entao uma chamada so
-   conhece a assinatura se a funcao vem antes no fonte (ou e a propria
-   funcao, na recursao). Chamada a funcao definida mais adiante tem tipo
-   desconhecido e os argumentos vao sem cast */
-
-static const char **funcs;
-static int nfuncs, capfuncs;
-
-static void func_define(const char *name) {
-    if (nfuncs == capfuncs) {
-        capfuncs = capfuncs ? capfuncs * 2 : 8;
-        funcs = realloc(funcs, capfuncs * sizeof(char *));
-    }
-    funcs[nfuncs++] = name;
-}
-
-static const Symbol *func_known(const char *name) {
-    for (int i = 0; i < nfuncs; i++)
-        if (strcmp(funcs[i], name) == 0) return symtab_lookup_func(name);
-    return NULL;
-}
-
 static DataType cur_ret;   /* tipo de retorno da funcao em andamento */
+static int in_main;        /* 1 dentro do `main`: o return vira exit (#55) */
 
 /* ---- tipos ---- */
 
@@ -98,15 +76,18 @@ static DataType spec_type(const Node *spec) {
 }
 
 /* ---- expressoes ----
-   Cada expressao devolve o Rust e o tipo dela. O tipo e o da arvore, menos
-   quando depende de uma chamada a funcao definida mais adiante: ai e
-   TYPE_UNKNOWN, como era no parse, e nao entra cast (o Rust era gerado nas
-   acoes, antes do semantic_resolve_types, e a saida tem que continuar a
-   mesma) */
+   Cada expressao devolve o Rust e o tipo dela em C. A chamada usa a
+   assinatura da tabela, que no fim do parse tem todas as funcoes, mesmo as
+   definidas depois do uso.
+
+   Comparacao, `&&`, `||` e `!` dao int em C (0 ou 1), mas bool em Rust:
+   `is_bool` marca esse codigo. Onde o contexto espera numero ele vira
+   `((a < b) as i32)`, e onde espera condicao o numero vira `(x != 0)` (#55) */
 
 typedef struct {
     char *code;
     DataType type;
+    int is_bool;
 } Expr;
 
 static Expr gen_expr(const Node *e);
@@ -153,10 +134,41 @@ static int is_float_literal(const Node *n) {
     return n->n_children == 1 && label_is(n->children[0], "FLOAT_NUMBER");
 }
 
+/* bool do Rust usado como numero: vira o 0/1 de C */
+static Expr to_value(Expr x) {
+    if (!x.is_bool) return x;
+    char *c;
+    if (strcmp(x.code, "true") == 0 || strcmp(x.code, "false") == 0)
+        c = strdup(x.code[0] == 't' ? "1" : "0");     /* comparacao dobrada pelo -O */
+    else
+        c = xfmt(is_wrapped(x.code) ? "(%s as i32)" : "((%s) as i32)", x.code);
+    free(x.code);
+    return (Expr){c, TYPE_INT, 0};
+}
+
+/* o zero do tipo, pra comparar: em C, condicao diferente de zero e verdadeira */
+static const char *zero_of(DataType t) {
+    if (t == TYPE_FLOAT || t == TYPE_DOUBLE) return "0.0";
+    if (t == TYPE_CHAR) return "'\\0'";
+    return "0";
+}
+
+/* expressao usada como condicao (`if`, `while`, `for`, `&&`, `||`, `!`):
+   bool fica, numero vira `(x != 0)`. `n` e o no, pro tipo quando o do
+   codigo nao e conhecido. Toma posse de x.code */
+static char *to_cond(Expr x, const Node *n) {
+    if (x.is_bool) return x.code;
+    DataType t = type_is_numeric(x.type) ? x.type : n->type;
+    char *c = xfmt("(%s != %s)", x.code, zero_of(t));
+    free(x.code);
+    return c;
+}
+
 /* codigo da expressao `x` (no `n`) convertido pro tipo `to`. So converte
    entre tipos numericos diferentes; o literal float nao precisa (o do Rust
-   se ajusta a f32/f64). Toma posse de x.code */
+   se ajusta a f32/f64). bool vira numero antes. Toma posse de x.code */
 static char *coerce(Expr x, const Node *n, DataType to) {
+    x = to_value(x);
     DataType from = x.type;
     if (!type_is_numeric(from) || !type_is_numeric(to) || from == to)
         return x.code;
@@ -172,9 +184,14 @@ static char *gen_coerced(const Node *n, DataType to) {
     return coerce(gen_expr(n), n, to);
 }
 
-/* gera a expressao `n` sem conversao */
+/* gera a expressao `n` como valor, sem conversao de tipo */
 static char *gen_plain(const Node *n) {
-    return gen_expr(n).code;
+    return to_value(gen_expr(n)).code;
+}
+
+/* gera a expressao `n` como condicao */
+static char *gen_cond(const Node *n) {
+    return to_cond(gen_expr(n), n);
 }
 
 static char *unop_code(const char *op, char *operand) {
@@ -216,17 +233,27 @@ static Expr gen_binop(const Node *e) {
         }
 
     Expr l = gen_expr(e->children[0]), r = gen_expr(e->children[2]);
-    DataType res, operand = TYPE_NONE;
-    if (l.type == TYPE_UNKNOWN || r.type == TYPE_UNKNOWN) {
-        res = TYPE_UNKNOWN;
+    char *lc, *rc;
+    DataType res = TYPE_INT;
+    if (kind == OPK_LOGIC) {
+        /* os dois lados sao condicao: `a && b` com int vira `(a != 0) && (b != 0)` */
+        lc = to_cond(l, e->children[0]);
+        rc = to_cond(r, e->children[2]);
     } else {
-        operand = type_promote(l.type, r.type);
-        res = (kind == OPK_ARITH || kind == OPK_INT) ? operand : TYPE_INT;
-        if (kind == OPK_LOGIC) operand = TYPE_NONE;
+        l = to_value(l);
+        r = to_value(r);
+        DataType operand = TYPE_NONE;
+        if (l.type == TYPE_UNKNOWN || r.type == TYPE_UNKNOWN) {
+            res = TYPE_UNKNOWN;
+        } else {
+            operand = type_promote(l.type, r.type);
+            if (kind == OPK_ARITH || kind == OPK_INT) res = operand;
+        }
+        lc = coerce(l, e->children[0], operand);
+        rc = coerce(r, e->children[2], operand);
     }
-
-    char *lc = coerce(l, e->children[0], operand), *rc = coerce(r, e->children[2], operand);
-    Expr out = {xfmt(kind == OPK_CMP ? "(%s %s %s)" : "%s %s %s", lc, op, rc), res};
+    Expr out = {xfmt(kind == OPK_CMP ? "(%s %s %s)" : "%s %s %s", lc, op, rc), res,
+                kind == OPK_CMP || kind == OPK_LOGIC};
     free(lc);
     free(rc);
     return out;
@@ -247,13 +274,13 @@ static int collect_args(const Node *opt_arg_list, const Node ***out) {
     return n;
 }
 
-/* `f(a, b)`: com a funcao ja definida, cada argumento vira o tipo do
-   parametro (com cast se difere) e o resultado tem o tipo de retorno */
+/* `f(a, b)`: cada argumento vira o tipo do parametro (com cast se difere)
+   e o resultado tem o tipo de retorno */
 static Expr gen_call(const Node *e) {
     const char *name = e->children[0]->text;
     const Node **args;
     int n = collect_args(e->children[2], &args);
-    const Symbol *f = func_known(name);
+    const Symbol *f = symtab_lookup_func(name);
 
     char *list = strdup("");
     for (int i = 0; i < n; i++) {
@@ -265,7 +292,7 @@ static Expr gen_call(const Node *e) {
         list = joined;
     }
     free(args);
-    Expr out = {xfmt("%s(%s)", name, list), f ? f->type : TYPE_UNKNOWN};
+    Expr out = {xfmt("%s(%s)", name, list), f ? f->type : TYPE_UNKNOWN, 0};
     free(list);
     return out;
 }
@@ -274,7 +301,6 @@ static Expr gen_call(const Node *e) {
    criado pelo -O sai como o lexema, e a comparacao dobrada como bool */
 static char *gen_literal(const Node *e) {
     const Node *leaf = e->children[0];
-    if (e->folded == FOLD_BOOL) return strdup(atoi(leaf->text) ? "true" : "false");
     if (e->folded == FOLD_VALUE) return strdup(leaf->text);
     if (label_is(leaf, "INT_NUMBER")) return xfmt("%d", atoi(leaf->text));
     return xfmt("%f", atof(leaf->text));
@@ -291,6 +317,7 @@ static Expr gen_expr(const Node *e) {
     if (type_is_numeric(x.type) && type_is_numeric(e->type) && x.type != e->type) {
         x.code = coerce(x, e, e->type);
         x.type = e->type;
+        x.is_bool = 0;
     }
     return x;
 }
@@ -302,9 +329,12 @@ static Expr gen_expr_inner(const Node *e) {
         const Node *leaf = e->children[0];
         if (label_is(leaf, "IDENTIFIER")) {
             DataType t = var_type(leaf->text);
-            return (Expr){strdup(leaf->text), t == TYPE_ERROR ? e->type : t};
+            return (Expr){strdup(leaf->text), t == TYPE_ERROR ? e->type : t, 0};
         }
-        return (Expr){gen_literal(e), e->type};
+        /* comparacao dobrada pelo -O: e bool no Rust, como a original */
+        if (e->folded == FOLD_BOOL)
+            return (Expr){strdup(atoi(leaf->text) ? "true" : "false"), TYPE_INT, 1};
+        return (Expr){gen_literal(e), e->type, 0};
     }
     if (n == 4) return gen_call(e);
     if (n == 3 && label_is(e->children[0], "LPAREN")) {
@@ -321,12 +351,17 @@ static Expr gen_expr_inner(const Node *e) {
         const Node *operand = e->children[1];
         Expr in = gen_expr(operand);
         if (label_is(e->children[0], "NOT")) {
-            DataType t = in.type == TYPE_UNKNOWN ? TYPE_UNKNOWN : TYPE_INT;
-            return (Expr){unop_code("!", in.code), t};
+            /* `!x` de C e `x == 0`; o `!` do Rust num inteiro inverte os bits */
+            if (in.is_bool) return (Expr){unop_code("!", in.code), TYPE_INT, 1};
+            DataType t = type_is_numeric(in.type) ? in.type : operand->type;
+            char *c = xfmt("(%s == %s)", in.code, zero_of(t));
+            free(in.code);
+            return (Expr){c, TYPE_INT, 1};
         }
         /* `-` promove char pra int */
+        in = to_value(in);
         DataType t = in.type == TYPE_UNKNOWN ? TYPE_UNKNOWN : type_promote(in.type, TYPE_INT);
-        return (Expr){unop_code("-", coerce(in, operand, t)), t};
+        return (Expr){unop_code("-", coerce(in, operand, t)), t, 0};
     }
     return gen_binop(e);
 }
@@ -390,7 +425,7 @@ static char *gen_for_init(const Node *n) {
 
 static char *gen_for_cond(const Node *n) {
     if (label_is(n->children[0], "ε")) return strdup("true");
-    return gen_plain(n->children[0]);
+    return gen_cond(n->children[0]);
 }
 
 static char *gen_for_incr(const Node *n) {
@@ -419,7 +454,7 @@ static char *gen_for(const Node *s) {
 
 /* `if`/`while`: `cond` e o corpo, com o `else` opcional */
 static char *gen_if_while(const Node *s, const char *kw) {
-    char *cond = gen_plain(s->children[2]);
+    char *cond = gen_cond(s->children[2]);
     char *then = gen_stmt(s->children[4]);
     char *buf;
     if (s->n_children == 7) {
@@ -443,6 +478,13 @@ static char *gen_stmt(const Node *s) {
     if (strcmp(k, "IDENTIFIER") == 0)
         return gen_assign(s, "    %s = %s;\n");
     if (strcmp(k, "RETURN") == 0) {
+        /* o main do Rust nao devolve valor: o return de C vira o exit code */
+        if (in_main) {
+            char *val = gen_coerced(s->children[1], TYPE_INT);
+            char *buf = xfmt("    std::process::exit(%s);\n", val);
+            free(val);
+            return buf;
+        }
         /* em funcao void o valor ja deu erro; sem cast pra () */
         char *val = cur_ret == TYPE_VOID ? gen_plain(s->children[1])
                                          : gen_coerced(s->children[1], cur_ret);
@@ -491,13 +533,15 @@ static char *gen_function(const Node *f) {
     int mark = scope_mark();
     char *params = label_is(opt_params->children[0], "ε") ? strdup("")
                                                           : gen_params(opt_params->children[0]);
-    /* a funcao ja vale dentro do proprio corpo (recursao) */
-    func_define(name);
     cur_ret = ret;
+    in_main = strcmp(name, "main") == 0;
     char *body = gen_stmt_list(f->children[6]);
     scope_pop(mark);
 
-    char *buf = xfmt("fn %s(%s) -> %s {\n%s}\n", name, params, type_to_rust(ret), body);
+    /* `fn main()` do Rust nao tem tipo de retorno (o valor sai pelo exit) */
+    char *buf = in_main ? xfmt("fn main(%s) {\n%s}\n", params, body)
+                        : xfmt("fn %s(%s) -> %s {\n%s}\n", name, params, type_to_rust(ret), body);
+    in_main = 0;
     free(params);
     free(body);
     return buf;
@@ -514,11 +558,11 @@ void codegen_rust(const Node *root, FILE *out) {
     char *code = gen_function_list(root->children[0]);
     fputs(code, out);
     free(code);
+    /* sem main o rustc nao gera o executavel: entra um main vazio */
+    const Symbol *m = symtab_lookup_func("main");
+    if (!m || m->kind != SYM_FUNC) fputs("\nfn main() {}\n", out);
 
     free(vars);
     vars = NULL;
     nvars = capvars = 0;
-    free(funcs);
-    funcs = NULL;
-    nfuncs = capfuncs = 0;
 }

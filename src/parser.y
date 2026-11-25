@@ -45,12 +45,20 @@ static const char *current_func_name;
 static DataType *current_func_params;
 static int current_func_n, current_func_cap;
 
+/* variavel cujo inicializador esta sendo lido: em C, o `x` de `int x = x`
+   ja e a variavel nova (o escopo dela comeca no nome), e le lixo (#55) */
+static const Symbol *initializing;
+
 /* uso de `name` como variavel (em expressao ou como alvo de atribuicao):
    tem que haver uma variavel ou parametro visivel com esse nome */
 static DataType check_var_use(const char *name, int line) {
     Symbol *sym = symtab_lookup(name);
     if (!sym) {
         semantic_error(line, "variável '%s' não declarada", name);
+        return TYPE_ERROR;
+    }
+    if (sym == initializing) {
+        semantic_error(line, "variável '%s' usada na própria inicialização", name);
         return TYPE_ERROR;
     }
     if (sym->kind == SYM_FUNC) {
@@ -75,13 +83,17 @@ static int count_args(const Node *opt_arg_list) {
 }
 
 /* declaracao de variavel: redeclarar no mesmo escopo e erro, mas esconder
-   um nome de um escopo externo (sombreamento) e valido */
-static void declare_var(const char *name, int line) {
+   um nome de um escopo externo (sombreamento) e valido. Devolve o simbolo
+   novo, ou NULL se ja havia outro no escopo */
+static const Symbol *declare_var(const char *name, int line) {
     if (current_decl_type == TYPE_VOID)
         semantic_error(line, "variável '%s' não pode ser do tipo void", name);
-    if (symtab_insert(name, SYM_VAR, current_decl_type, line) != 0)
+    if (symtab_insert(name, SYM_VAR, current_decl_type, line) != 0) {
         semantic_error(line, "variável '%s' já declarada neste escopo (linha %d)",
                        name, symtab_lookup_current(name)->line);
+        return NULL;
+    }
+    return symtab_lookup_current(name);
 }
 
 static void func_param_add(DataType t) {
@@ -276,6 +288,11 @@ function:
     }
     LBRACE statement_list RBRACE {
         scope_exit();
+        /* em Rust a funcao com retorno nao pode chegar ao fim sem return.
+           O main fica de fora: em C ele devolve 0 se acabar (#55) */
+        if (current_func_ret != TYPE_VOID && strcmp($2.s_val, "main") != 0 &&
+            !semantic_always_returns($9))
+            semantic_error(@10.first_line, "função '%s' pode chegar ao fim sem return", $2.s_val);
         $$ = mk("function", @1.first_line,
                 $1, node_leaf("IDENTIFIER", $2.s_val, @2.first_line), tok("LPAREN", @3.first_line),
                 $5, tok("RPAREN", @6.first_line), tok("LBRACE", @8.first_line),
@@ -455,13 +472,18 @@ declarator:
         $$ = mk("declarator", @1.first_line,
                 node_leaf("IDENTIFIER", $1.s_val, @1.first_line), NULL);
     }
-    | IDENTIFIER ASSIGN expr {
-        declare_var($1.s_val, @1.first_line);
+    | IDENTIFIER {
+        /* como em C, a variavel existe a partir do nome, antes do valor:
+           o `x` de `int x = x` e ela mesma, e isso e erro (#55) */
+        initializing = declare_var($1.s_val, @1.first_line);
+    }
+    ASSIGN expr {
+        initializing = NULL;
         /* o tipo declarado vale pro valor: int x = 2.5 converte (o cast fica
            com o codegen) */
-        check_value($3, current_decl_type, @2.first_line, "inicialização de '%s' com valor void", $1.s_val);
+        check_value($4, current_decl_type, @3.first_line, "inicialização de '%s' com valor void", $1.s_val);
         $$ = mk("declarator", @1.first_line,
-                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @2.first_line), $3, NULL);
+                node_leaf("IDENTIFIER", $1.s_val, @1.first_line), tok("ASSIGN", @3.first_line), $4, NULL);
     }
 ;
 

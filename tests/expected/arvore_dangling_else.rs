@@ -1,13 +1,13 @@
-fn main() -> i32 {
+fn main() {
     let mut a: i32 = 1;
     let mut b: i32 = 1;
     let mut x: i32 = 0;
-    if a {
-    if b {
+    if (a != 0) {
+    if (b != 0) {
     x = 1;
     } else {
     x = 2;
     }
     }
-    return x;
+    std::process::exit(x);
 }
