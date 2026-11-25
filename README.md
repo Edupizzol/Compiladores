@@ -20,6 +20,7 @@ Pré-requisitos: `gcc`, `bison`, `flex` (e `graphviz`, só pra desenhar a
 make          # gera parser.tab.c/h (bison), lex.yy.c (flex) e o binário `compiler`
 make run      # roda o compiler em cima de tests/inputs/exemplo.c
 make test     # roda a suíte de regressão (tests/expected/) e a sanidade da árvore
+make asan     # builda com ASan/UBSan e roda todos os inputs, com e sem -O
 make clean    # remove os artefatos gerados
 
 ./compiler arquivo.c            # imprime o Rust gerado
@@ -29,6 +30,7 @@ make clean    # remove os artefatos gerados
 ./compiler --tac arquivo.c      # imprime o código de três endereços (TAC)
 ./compiler --dot arquivo.c      # exporta a árvore em Graphviz (DOT)
 ./compiler --symtab arquivo.c   # imprime a tabela de símbolos
+./compiler -O arquivo.c         # liga as otimizações (combina com qualquer flag)
 ./compiler --help               # lista todas as flags
 ```
 
@@ -257,6 +259,29 @@ return 7
 A propagação não passa de um bloco básico para outro. Sem `-O`, o TAC
 continua o mesmo.
 
+## Otimização (`-O`)
+
+A flag `-O` liga todas as otimizações e combina com qualquer outra: sem flag
+de análise sai o Rust otimizado, e com `--tree`, `--types` ou `--tac` sai a
+análise do programa otimizado. Sem `-O`, nenhum passe roda e a saída é
+idêntica à de antes.
+
+Os passes rodam sempre na mesma ordem (ver `src/optimize.h`):
+
+1. **constant folding** (`2 + 3 * 4` → `14`), em cada `expr` que o parser
+   reduz;
+2. **simplificações algébricas** (`x * 1` → `x`, `x * 0` → `0`, `x * 2` →
+   `x << 1`), na mesma `expr`, logo depois do folding;
+3. **código morto** (`if` com condição constante, `while`/`for` que nunca
+   rodam, comando depois de `return`/`break`/`continue`), em cada comando,
+   depois que as expressões dele já foram dobradas;
+4. **otimização do TAC** (seção acima), só com `--tac`.
+
+Os três exemplos da semana 9 (`tests/inputs/opt_semana9.c`) saem como `14`,
+`5 + x * 4` e `21`. O que mudaria o comportamento não é dobrado: divisão ou
+`%` por zero, overflow de int, shift fora de 0..31 e `f() * 0`, que continua
+chamando `f()` (`tests/inputs/opt_sem_folding.c`).
+
 ## O que já funciona
 
 - Léxico completo: tipos `int`, `float`, `double`, `char`, `void` e
@@ -306,7 +331,9 @@ continua o mesmo.
   funções);
 - `symtab_basico.c` e `simbolos_*.c`: escopos, sombreamento, recursão e
   função definida depois;
-- `erro_*.c`: um erro semântico por arquivo.
+- `erro_*.c`: um erro semântico por arquivo;
+- `opt_*.c`: os casos do `-O` (folding da semana 9, o que não pode dobrar,
+  código morto e propagação no TAC).
 
 ### A suíte de regressão
 
@@ -327,6 +354,11 @@ esperado que decide a flag passada pro compilador:
 | `<nome>.types`     | `--types`    | stdout: a árvore com os tipos            |
 | `<nome>.tac`       | `--tac`      | stdout: o código de três endereços       |
 | `<nome>.err`       | *(nenhuma)*  | stderr, e o exit code tem que ser ≠ 0    |
+| `<nome>.opt.<ext>` | `-O` + a de `<ext>` | o mesmo que `<ext>`, com otimização |
+
+Com `.opt` antes da extensão o caso roda com `-O`: `opt_semana9.opt.rs` é o
+Rust otimizado de `opt_semana9.c`, e `opt_semana9.opt.tac` é o
+`-O --tac`. O mesmo input pode ter os dois esperados, com e sem `-O`.
 
 Pra adicionar um caso de teste:
 
@@ -344,6 +376,13 @@ não o alteraram.
 Depois da suíte, o `make test` roda a sanidade da árvore
 (`tests/check_tree_tokens.sh`): as folhas da árvore, lidas em ordem, têm que
 bater com os tokens do `--tokens`, com a pontuação incluída.
+
+O `make asan` builda o compilador de novo com `-fsanitize=address,undefined`
+(em `compiler-asan`) e roda `tests/check_asan.sh`: todos os inputs, com e sem
+`-O` e com as flags de análise, e falha se o ASan, o LeakSanitizer ou o UBSan
+reclamarem. Serve pra pegar vazamento e *use-after-free* quando um passe do
+`-O` troca uma subárvore. Fica fora do `make test` porque o build é mais
+lento.
 
 Pra verificar que a gramática não ganhou conflitos ao mexer no `parser.y`,
 rode o bison direto com `-Wall`:
