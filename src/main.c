@@ -8,6 +8,7 @@
 #include "semantic.h"
 #include "symtab_dump.h"
 #include "tac.h"
+#include "tac_opt.h"
 
 int yyparse(void);
 int yylex(void);
@@ -35,7 +36,7 @@ static void usage(FILE *out, const char *prog) {
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
         "  --tac       imprime o código de três endereços\n"
-        "  -O          liga as otimizações (constant folding)\n"
+        "  -O          liga as otimizações (na árvore e no --tac)\n"
         "  --help      mostra esta ajuda\n"
         "\n"
         "as opções podem ser combinadas: %s --tree --dot arquivo.c\n",
@@ -142,8 +143,20 @@ int main(int argc, char **argv) {
     if (syntax_ok && (g_options & OPT_SYMTAB))
         symtab_dump(stdout);
     /* o TAC so sai pra programa valido: com erro nao ha o que gerar */
-    if (syntax_ok && (g_options & OPT_TAC) && semantic_errors == 0 && lexical_errors == 0)
-        tac_generate(parse_root, stdout);
+    if (syntax_ok && (g_options & OPT_TAC) && semantic_errors == 0 && lexical_errors == 0) {
+        if (g_options & OPT_OPTIMIZE) {
+            /* com -O o TAC e gerado num buffer e otimizado antes de sair (#52) */
+            char *buf = NULL;
+            size_t len = 0;
+            FILE *mem = open_memstream(&buf, &len);
+            tac_generate(parse_root, mem);
+            fclose(mem);
+            tac_optimize(buf, stdout);
+            free(buf);
+        } else {
+            tac_generate(parse_root, stdout);
+        }
+    }
 
     node_free(parse_root);
     parser_cleanup();
