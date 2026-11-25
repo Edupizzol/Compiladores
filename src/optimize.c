@@ -44,24 +44,23 @@ static int literal_value(const Node *e, Lit *out) {
 static double as_double(Lit v) { return v.is_float ? v.f : (double)v.i; }
 static int is_true(Lit v) { return v.is_float ? v.f != 0.0 : v.i != 0; }
 
-/* troca os filhos de `e` por uma folha so e o codigo por `code` (o no
-   continua sendo o mesmo, entao o pai nao precisa saber da troca) */
-static void replace_with_leaf(Node *e, const char *label, const char *text, const char *code) {
+/* troca os filhos de `e` por uma folha so, marcada com `folded` (FOLD_*).
+   O no continua sendo o mesmo, entao o pai nao precisa saber da troca */
+static void replace_with_leaf(Node *e, const char *label, const char *text, int folded) {
     for (int i = 0; i < e->n_children; i++)
         node_free(e->children[i]);
     e->n_children = 0;
     node_add_child(e, node_leaf(label, text, e->line));
-    free(e->code);
-    e->code = strdup(code);
+    e->folded = folded;
 }
 
 /* resultado inteiro (int de C). `rust_bool` marca comparacao e operador
-   logico: em C dao 0/1, mas no Rust gerado sao bool, entao o codigo vira
-   true/false (o mesmo tipo que a expressao original tinha no Rust) */
+   logico: em C dao 0/1, mas no Rust gerado sao bool, entao o codegen
+   escreve true/false (o mesmo tipo que a expressao original tinha no Rust) */
 static void set_int(Node *e, long long v, int rust_bool) {
     char text[32];
     snprintf(text, sizeof text, "%lld", v);
-    replace_with_leaf(e, "INT_NUMBER", text, rust_bool ? (v ? "true" : "false") : text);
+    replace_with_leaf(e, "INT_NUMBER", text, rust_bool ? FOLD_BOOL : FOLD_VALUE);
     e->type = TYPE_INT;
 }
 
@@ -74,7 +73,7 @@ static void set_float(Node *e, double v) {
         if (strtod(text, NULL) == v) break;
     }
     if (!strpbrk(text, ".e")) strcat(text, ".0");
-    replace_with_leaf(e, "FLOAT_NUMBER", text, text);
+    replace_with_leaf(e, "FLOAT_NUMBER", text, FOLD_VALUE);
 }
 
 static int fits_int(long long v) { return v >= INT_MIN && v <= INT_MAX; }
@@ -184,11 +183,11 @@ static int has_side_effect(const Node *n) {
     return 0;
 }
 
-/* substitui o conteudo de `e` pelo subtree `keep` (um dos operandos),
-   mantendo o cast se o tipo da expressao resultante difere do de keep
-   (ex. `x` int e `(x + 0.0)` double: o codigo vira `x as f64`). Os outros
-   filhos sao liberados. `keep` passa a ser consumido (filhos adotados por
-   `e`, o no de `keep` em si e liberado) */
+/* substitui o conteudo de `e` pelo subtree `keep` (um dos operandos). O
+   no `e` fica com o tipo dele, entao o codegen poe o cast quando o tipo
+   difere do de keep (ex. `x` int e `(x + 0.0)` double: o Rust sai
+   `(x as f64)`). Os outros filhos sao liberados. `keep` passa a ser
+   consumido (filhos adotados por `e`, o no de `keep` em si e liberado) */
 static void adopt_subtree(Node *e, Node *keep) {
     for (int i = 0; i < e->n_children; i++)
         if (e->children[i] != keep) node_free(e->children[i]);
@@ -196,21 +195,9 @@ static void adopt_subtree(Node *e, Node *keep) {
     e->children = keep->children;
     e->n_children = keep->n_children;
     e->cap = keep->cap;
-
-    DataType et = e->type;
-    char *new_code;
-    if (keep->type != et && type_is_numeric(keep->type) && type_is_numeric(et)) {
-        size_t n = strlen(keep->code) + 32;
-        new_code = malloc(n);
-        snprintf(new_code, n, "(%s as %s)", keep->code, type_to_rust(et));
-    } else {
-        new_code = strdup(keep->code);
-    }
-    free(e->code);
-    e->code = new_code;
+    e->folded = keep->folded;
 
     free(keep->text);
-    free(keep->code);
     free(keep);
 }
 
@@ -233,7 +220,7 @@ static int int_lit_eq(const Node *e, long long want) {
 }
 
 /* troca `x * 2` por `x << 1`: mantem o operando `keep`, substitui o `STAR`
-   por `SHIFTL` e o literal `2` por `1`, e regera o codigo. So inteiro.
+   por `SHIFTL` e o literal `2` por `1` (o Rust sai do no SHIFTL). So inteiro.
    Avaliacao unica do operando, entao vale mesmo com efeito colateral */
 static void strength_mul2(Node *e, int keep_idx, int lit_idx) {
     Node *keep = e->children[keep_idx];
@@ -243,17 +230,11 @@ static void strength_mul2(Node *e, int keep_idx, int lit_idx) {
     Node *one_expr = node_new("expr", e->line);
     node_add_child(one_expr, node_leaf("INT_NUMBER", "1", e->line));
     one_expr->type = TYPE_INT;
-    one_expr->code = strdup("1");
 
     e->children[0] = keep;
     e->children[1] = node_leaf("SHIFTL", NULL, e->line);
     e->children[2] = one_expr;
     e->n_children = 3;
-
-    free(e->code);
-    size_t n = strlen(keep->code) + 8;
-    e->code = malloc(n);
-    snprintf(e->code, n, "%s << 1", keep->code);
 }
 
 static void simplify_binary(Node *e) {
@@ -318,22 +299,21 @@ void fold_constants(Node *e) {
     if (e->n_children == 2) {
         fold_unary(e);
     } else if (e->n_children == 3 && strcmp(e->children[0]->label, "LPAREN") == 0) {
-        /* (literal) -> literal: o no fica com a folha e o codigo de dentro */
+        /* (literal) -> literal: o no fica com a folha e a marca de dentro */
         Lit v;
         Node *inner = e->children[1];
         if (!literal_value(inner, &v)) return;
         /* a folha de dentro e liberada na troca: copia antes */
         const char *label = inner->children[0]->label;
-        char *text = strdup(inner->children[0]->text), *code = strdup(inner->code);
-        replace_with_leaf(e, label, text, code);
+        char *text = strdup(inner->children[0]->text);
+        replace_with_leaf(e, label, text, inner->folded);
         free(text);
-        free(code);
     } else if (e->n_children == 3) {
         fold_binary(e);
     }
 }
 
-/* s adota os filhos e o rust de keep (um filho de s); os outros filhos saem */
+/* s adota os filhos de keep (um filho de s); os outros filhos saem */
 static void adopt_statement(Node *s, Node *keep) {
     for (int i = 0; i < s->n_children; i++)
         if (s->children[i] != keep) node_free(s->children[i]);
@@ -341,21 +321,20 @@ static void adopt_statement(Node *s, Node *keep) {
     s->children = keep->children;
     s->n_children = keep->n_children;
     s->cap = keep->cap;
-    free(s->code);
-    s->code = keep->code;
+    s->folded = keep->folded;   /* o ramo que fica pode ja ter sido apagado */
     free(keep->text);
     free(keep);
 }
 
-/* o statement some: vira um bloco vazio na arvore e fica sem rust */
+/* o statement some: vira um bloco vazio na arvore, marcado com FOLD_DEAD pra
+   o codegen nao imprimir nada (um `{ }` do fonte continua saindo `{}`) */
 static void make_empty(Node *s) {
     for (int i = 0; i < s->n_children; i++)
         node_free(s->children[i]);
     s->n_children = 0;
     node_add_child(s, node_leaf("LBRACE", NULL, s->line));
     node_add_child(s, node_leaf("RBRACE", NULL, s->line));
-    free(s->code);
-    s->code = strdup("");
+    s->folded = FOLD_DEAD;
 }
 
 static void dead_if(Node *s) {
@@ -390,14 +369,10 @@ static void dead_for(Node *s) {
     if (init->n_children == 1) { make_empty(s); return; }
 
     Node *st = node_new("statement", init->line);
-    size_t n = strlen(init->code) + 8;
-    st->code = malloc(n);
     if (init->n_children == 2) {
-        snprintf(st->code, n, "%s", init->code);
         node_add_child(st, init->children[0]);
         node_add_child(st, init->children[1]);
     } else {
-        snprintf(st->code, n, "    %s", init->code);
         node_add_child(st, init->children[0]);
         node_add_child(st, init->children[1]);
         node_add_child(st, init->children[2]);
@@ -406,12 +381,7 @@ static void dead_for(Node *s) {
     init->n_children = 0;
 
     Node *list = node_new("statement_list", init->line);
-    list->code = strdup(st->code);
     node_add_child(list, st);
-
-    size_t m = strlen(list->code) + 16;
-    char *code = malloc(m);
-    snprintf(code, m, "    {\n%s    }\n", list->code);
 
     for (int i = 0; i < s->n_children; i++)
         node_free(s->children[i]);
@@ -419,8 +389,6 @@ static void dead_for(Node *s) {
     node_add_child(s, node_leaf("LBRACE", NULL, s->line));
     node_add_child(s, list);
     node_add_child(s, node_leaf("RBRACE", NULL, s->line));
-    free(s->code);
-    s->code = code;
 }
 
 void eliminate_dead_code(Node *s) {
@@ -436,12 +404,12 @@ static int is_jump(const Node *st) {
     return strcmp(f, "RETURN") == 0 || strcmp(f, "BREAK") == 0 || strcmp(f, "CONTINUE") == 0;
 }
 
-/* a lista termina em return/break/continue? um comando ja apagado (code
-   vazio) nao conta: olha o anterior */
+/* a lista termina em return/break/continue? um comando ja apagado
+   (FOLD_DEAD) nao conta: olha o anterior */
 static int ends_with_jump(const Node *list) {
     const Node *last = list->children[list->n_children - 1];
     if (is_jump(last)) return 1;
-    if (last->code[0] == '\0' && list->n_children == 2)
+    if (last->folded == FOLD_DEAD && list->n_children == 2)
         return ends_with_jump(list->children[0]);
     return 0;
 }

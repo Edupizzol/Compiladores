@@ -8,6 +8,7 @@
 #include "semantic.h"
 #include "symtab_dump.h"
 #include "tac.h"
+#include "codegen.h"
 #include "tac_opt.h"
 
 int yyparse(void);
@@ -107,8 +108,10 @@ int main(int argc, char **argv) {
     symtab_init();
 
     int ret;
+    int parsed = 1;   /* o --tokens sozinho nao chama o parser */
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
+        parsed = 0;
         if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC)) {
             /* combinado com uma flag de analise: volta pro comeco do arquivo
                pra que o parser tambem possa rodar em cima dele */
@@ -116,6 +119,7 @@ int main(int argc, char **argv) {
             yyrestart(yyin);
             yylineno = 1;
             ret = yyparse();
+            parsed = 1;
         }
     } else {
         ret = yyparse();
@@ -124,7 +128,12 @@ int main(int argc, char **argv) {
     fclose(yyin);
 
     /* com erro sintatico nao ha arvore nem tabela: so a mensagem do yyerror */
-    int syntax_ok = ret == 0;
+    int syntax_ok = parsed && ret == 0;
+
+    /* o Rust sai da arvore inteira (#54), ja anotada e, com -O, otimizada.
+       So quando nenhuma flag de analise esta ligada e o programa e valido */
+    if (syntax_ok && emit_code && lexical_errors == 0 && semantic_errors == 0)
+        codegen_rust(parse_root, stdout);
 
     /* os erros semanticos saem todos juntos, em ordem de linha. Nao
        interrompem o parse, mas o programa e invalido: exit code != 0 */
