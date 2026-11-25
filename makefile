@@ -52,9 +52,12 @@ run: $(TARGET)
 # Imprime OK/FALHA por arquivo, mostra o diff na falha e sai com codigo
 # != 0 se algum falhar.
 # Depois roda a sanidade da arvore: as folhas tem que bater com os tokens.
+# Por fim, os testes de ponta a ponta: os .rs compilam no rustc e o Rust
+# gerado sai com o mesmo exit code que o C no gcc, com e sem -O (#57).
 test: $(TARGET)
 	@bash $(TEST_DIR)/run_tests.sh
 	@bash $(TEST_DIR)/check_tree_tokens.sh
+	@bash $(TEST_DIR)/check_rust.sh
 
 clean:
 	rm -f $(TARGET) $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)
