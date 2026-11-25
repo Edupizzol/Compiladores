@@ -23,7 +23,7 @@ BISON_OUT = parser.tab.c
 BISON_HDR = parser.tab.h
 FLEX_OUT  = lex.yy.c
 
-.PHONY: all clean run test
+.PHONY: all clean run test asan
 
 all: $(TARGET)
 
@@ -49,6 +49,7 @@ run: $(TARGET)
 #   .tree    -> --tree   (stdout: a arvore em texto)
 #   .symtab  -> --symtab (stdout: a tabela de simbolos)
 #   .err     -> espera exit code != 0 e compara o stderr
+#   .opt.<ext> -> o mesmo, com -O (ex.: .opt.rs, .opt.tac)
 # Imprime OK/FALHA por arquivo, mostra o diff na falha e sai com codigo
 # != 0 se algum falhar.
 # Depois roda a sanidade da arvore: as folhas tem que bater com os tokens.
@@ -56,5 +57,13 @@ test: $(TARGET)
 	@bash $(TEST_DIR)/run_tests.sh
 	@bash $(TEST_DIR)/check_tree_tokens.sh
 
+# Checagem de memoria (issue #53): builda o compilador com ASan/UBSan em
+# $(TARGET)-asan e roda em todos os inputs, com e sem -O. Fica fora do
+# `make test` porque o build com sanitizer e mais lento.
+asan: $(BISON_OUT) $(FLEX_OUT) $(EXTRA_SRCS) $(HEADERS)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer \
+		-o $(TARGET)-asan $(BISON_OUT) $(FLEX_OUT) $(EXTRA_SRCS)
+	@bash $(TEST_DIR)/check_asan.sh
+
 clean:
-	rm -f $(TARGET) $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)
+	rm -f $(TARGET) $(TARGET)-asan $(BISON_OUT) $(BISON_HDR) $(FLEX_OUT)

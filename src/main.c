@@ -36,11 +36,13 @@ static void usage(FILE *out, const char *prog) {
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
         "  --tac       imprime o código de três endereços\n"
-        "  -O          liga as otimizações (na árvore e no --tac)\n"
+        "  -O          liga as otimizações: folding, simplificações algébricas e\n"
+        "              código morto na árvore, e propagação no --tac\n"
         "  --help      mostra esta ajuda\n"
         "\n"
-        "as opções podem ser combinadas: %s --tree --dot arquivo.c\n",
-        prog, prog);
+        "as opções podem ser combinadas: %s --tree --dot arquivo.c\n"
+        "e o -O vale junto com qualquer uma: %s -O --tac arquivo.c\n",
+        prog, prog, prog);
 }
 
 /* modo --tokens: so roda o lexico e lista os tokens, sem passar pelo parser */
