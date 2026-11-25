@@ -95,7 +95,10 @@ static void func_param_add(DataType t) {
 /* com -O, dobra a expressao recem-criada se os operandos forem literais
    (#49). Os filhos ja passaram por aqui quando foram reduzidos */
 static Node *opt_expr(Node *n) {
-    if (g_options & OPT_OPTIMIZE) fold_constants(n);
+    if (g_options & OPT_OPTIMIZE) {
+        fold_constants(n);
+        simplify_algebraic(n);    /* pega os casos com variavel (#50) */
+    }
     return n;
 }
 
