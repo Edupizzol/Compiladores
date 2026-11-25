@@ -2,11 +2,11 @@ fn zero() -> i32 {
     return 0;
 }
 
-fn soma(a: i32, b: i32) -> i32 {
+fn soma(mut a: i32, mut b: i32) -> i32 {
     return a + b;
 }
 
-fn media(x: f64, y: f64) -> f64 {
+fn media(mut x: f64, mut y: f64) -> f64 {
     return (x + y) / 2.000000;
 }
 

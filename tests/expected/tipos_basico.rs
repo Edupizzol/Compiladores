@@ -1,4 +1,4 @@
-fn media(a: i32, b: f32) -> f32 {
+fn media(mut a: i32, mut b: f32) -> f32 {
     return ((a as f32) + b) / (2 as f32);
 }
 

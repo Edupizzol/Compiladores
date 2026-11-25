@@ -21,7 +21,8 @@ Pré-requisitos: `gcc`, `bison`, `flex` (e `graphviz`, só pra desenhar a
 ```bash
 make          # gera parser.tab.c/h (bison), lex.yy.c (flex) e o binário `compiler`
 make run      # roda o compiler em cima de tests/inputs/exemplo.c
-make test     # roda a suíte de regressão (tests/expected/) e a sanidade da árvore
+make test     # roda a suíte de regressão (tests/expected/), a sanidade da árvore
+              # e os testes de ponta a ponta com rustc e gcc
 make asan     # builda com ASan/UBSan e roda todos os inputs, com e sem -O
 make clean    # remove os artefatos gerados
 
@@ -241,7 +242,12 @@ recusar o código:
   porque o `!` do Rust num inteiro inverte os bits;
 - o `main` do Rust não devolve valor: `int main()` vira `fn main()`, e o
   `return v;` dele vira `std::process::exit(v);`. Programa sem `main` ganha um
-  `fn main() {}` vazio.
+  `fn main() {}` vazio;
+- parâmetro sai como `mut` (`fn f(mut n: i32)`), porque em C ele é uma
+  variável local comum e pode receber valor (`n = n - 1`);
+- `for` vira um `while` com o passo no fim do corpo, e o `continue` de um
+  `for` sai como `passo; continue;`, senão o passo seria pulado e o laço não
+  terminaria.
 
 ## Código de três endereços (TAC)
 
@@ -455,6 +461,7 @@ Os três exemplos da semana 9 (`tests/inputs/opt_semana9.c`) saem como `14`,
 - `symtab_basico.c` e `simbolos_*.c`: escopos, sombreamento, recursão e
   função definida depois;
 - `erro_*.c`: um erro semântico por arquivo;
+- `e2e_*.c`: programas que calculam algo, para a comparação com o `gcc`;
 - `rust_*.c`: os casos em que o Rust gerado precisa de ajuste pra compilar
   (bool como valor, número como condição, `main`, programa sem `main` e
   chamada adiantada).
@@ -506,24 +513,37 @@ bater com os tokens do `--tokens`, com a pontuação incluída.
 
 ### Ponta a ponta com `rustc` e `gcc`
 
-Depois do `check_tree_tokens.sh`, o `make test` chama o
-`tests/check_rust.sh`:
+Por último, o `make test` roda `tests/check_rust.sh`, que confere o Rust de
+verdade em vez de só compará-lo com o esperado:
 
-1. cada `.rs` de `tests/expected/` (inclusive os `.opt.rs` com `-O`) compila
-   no `rustc` sem erro;
-2. cada input válido com `main` roda no `gcc` e no `rustc`, sem e com `-O`,
-   e o exit code tem que bater. Laço infinito estoura 5 s e conta como
-   falha.
+1. cada `.rs` de `tests/expected/` (inclusive os `.opt.rs`) tem que compilar
+   no `rustc`;
+2. cada input válido com `main` é compilado com o `gcc` e, pelo nosso
+   compilador, com o `rustc`, sem e com `-O`. Os três programas rodam e têm
+   que sair com o mesmo exit code. O subconjunto não tem `printf`, então o
+   resultado sai pelo `return` do `main` (no Rust, `std::process::exit`).
+   Um laço infinito estoura o limite de 5 s e conta como falha.
 
-Sem `rustc`, o script avisa e passa; sem `gcc`, pula a parte 2. O
-subconjunto deixa chamar função antes de definir e o gcc recusa declaração
-implícita, então o script insere os protótipos no começo do `.c` antes de
-compilar com gcc.
+Como o subconjunto deixa chamar uma função antes de defini-la e o `gcc` não
+aceita declaração implícita, o script põe os protótipos das funções no
+começo do `.c` antes de compilar. Sem `rustc` instalado, o script só avisa e
+passa; sem `gcc`, pula a parte 2.
 
-Ficam de fora da parte 2 (lista `SKIP` no script, com o motivo):
-`tarefa2_controle_fluxo` e `tac_expressoes` leem variável sem valor (UB em
-C, E0381 no rustc); `tac_otimizacao` e `opt_sem_folding` dividem por zero
-de propósito.
+Os inputs `e2e_*.c` existem para essa comparação: fatorial (recursivo e com
+`while`), fibonacci (com `for` e recursivo), soma com `for`, `break` e
+`continue`, e conversões entre `int`, `double` e `char`.
+
+Inputs que ficam de fora (a lista `SKIP` no script):
+
+| input                      | motivo                                                                 |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `tarefa2_controle_fluxo.c` | lê variável sem valor (`int i; if (i)`): UB em C, e o `rustc` recusa com E0381 |
+| `tac_expressoes.c`         | lê variável sem valor (`char ch;`): UB em C, e o `rustc` recusa com E0381 |
+| `tac_otimizacao.c`         | divide por zero de propósito (`c / 0`): UB em C, e o `rustc` recusa (`unconditional_panic`) |
+| `opt_sem_folding.c`        | divide por zero de propósito (`5 / 0`): UB em C, e o `rustc` recusa (`unconditional_panic`) |
+
+Os quatro testam outra coisa (o parser, o TAC e o que o `-O` não pode dobrar)
+e foram escritos assim de propósito.
 
 ### ASan/UBSan
 
