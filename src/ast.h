@@ -6,8 +6,9 @@
 
 /* literal criado pelo -O (#49): o Rust dele sai do lexema da folha, e nao
    do valor como no literal do fonte. FOLD_BOOL e comparacao/logico dobrado,
-   que e 0/1 em C mas bool no Rust gerado */
-enum { FOLD_NONE, FOLD_VALUE, FOLD_BOOL };
+   que e 0/1 em C mas bool no Rust gerado. FOLD_DEAD e o statement apagado pelo
+   codigo morto (#51): fica `{ }` na arvore e nao sai nada no Rust */
+enum { FOLD_NONE, FOLD_VALUE, FOLD_BOOL, FOLD_DEAD };
 
 /* No da arvore de derivacao. Cada regra do parser cria um no; o Rust sai
    depois, do percurso da arvore inteira (codegen.c, #54). */
@@ -15,7 +16,7 @@ typedef struct Node {
     const char *label;      /* nao-terminal ou token (literal, nao e copiado) */
     char *text;             /* lexema, so nas folhas (NULL nos demais) */
     int line;               /* linha do fonte onde o no comeca */
-    int folded;             /* FOLD_* (so nos `expr`), FOLD_NONE nos demais */
+    int folded;             /* FOLD_* (nos `expr` e no statement apagado), FOLD_NONE nos demais */
     DataType type;          /* tipo da expressao (so nos `expr`), TYPE_NONE nos demais */
     struct Node **children;
     int n_children, cap;
