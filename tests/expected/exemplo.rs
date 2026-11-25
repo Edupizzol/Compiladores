@@ -1,4 +1,4 @@
-fn soma(a: i32, b: i32) -> i32 {
+fn soma(mut a: i32, mut b: i32) -> i32 {
     let mut res: i32 = a + b;
     return res;
 }

@@ -1,4 +1,4 @@
-fn dobro(v: i32) -> i32 {
+fn dobro(mut v: i32) -> i32 {
     return v * 2;
 }
 

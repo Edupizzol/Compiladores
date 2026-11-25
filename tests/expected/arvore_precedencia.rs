@@ -1,8 +1,8 @@
-fn f(a: i32, b: i32) -> i32 {
+fn f(mut a: i32, mut b: i32) -> i32 {
     return a;
 }
 
-fn g(a: i32) -> i32 {
+fn g(mut a: i32) -> i32 {
     return a;
 }
 

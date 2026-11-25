@@ -1,4 +1,4 @@
-fn fatorial(n: i32) -> i32 {
+fn fatorial(mut n: i32) -> i32 {
     if (n <= 1) {
     return 1;
     }
@@ -11,7 +11,7 @@ fn main() {
     std::process::exit(r);
 }
 
-fn media(a: f64, b: f64) -> f64 {
+fn media(mut a: f64, mut b: f64) -> f64 {
     return (a + b) / 2.000000;
 }
 

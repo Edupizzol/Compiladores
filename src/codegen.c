@@ -523,14 +523,15 @@ static char *gen_stmt(const Node *s) {
 
 /* ---- funcoes ---- */
 
-/* `int a, double b` -> `a: i32, b: f64`; os parametros entram no escopo da
+/* `int a, double b` -> `mut a: i32, mut b: f64`; os parametros entram no escopo da
    funcao */
 static char *gen_params(const Node *l) {
     if (label_is(l, "param")) {
         DataType t = spec_type(l->children[0]);
         const char *name = l->children[1]->text;
         var_declare(name, t);
-        return xfmt("%s: %s", name, type_to_rust(t));
+        /* `mut` porque em C o parametro e uma variavel local comum (#57) */
+        return xfmt("mut %s: %s", name, type_to_rust(t));
     }
     if (l->n_children == 1) return gen_params(l->children[0]);
     char *left = gen_params(l->children[0]);

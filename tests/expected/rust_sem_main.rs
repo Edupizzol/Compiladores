@@ -1,4 +1,4 @@
-fn quadrado(v: i32) -> i32 {
+fn quadrado(mut v: i32) -> i32 {
     return v * v;
 }
 
