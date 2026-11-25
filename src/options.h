@@ -9,6 +9,7 @@
 #define OPT_TYPES   (1 << 4)
 #define OPT_TAC     (1 << 5)
 #define OPT_OPTIMIZE (1 << 6)  /* -O: liga as otimizacoes (#49) */
+#define OPT_BYTECODE (1 << 7)  /* --bytecode: bytecode de maquina de pilha (#56) */
 
 /* flags ativas nesta execucao (bitmask) */
 extern int g_options;

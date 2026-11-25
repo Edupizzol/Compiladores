@@ -9,6 +9,7 @@
 #include "symtab_dump.h"
 #include "tac.h"
 #include "tac_opt.h"
+#include "bytecode.h"
 
 int yyparse(void);
 int yylex(void);
@@ -36,6 +37,7 @@ static void usage(FILE *out, const char *prog) {
         "  --dot       exporta a árvore de derivação em formato Graphviz\n"
         "  --symtab    imprime a tabela de símbolos\n"
         "  --tac       imprime o código de três endereços\n"
+        "  --bytecode  imprime o bytecode de máquina de pilha\n"
         "  -O          liga as otimizações: folding, simplificações algébricas e\n"
         "              código morto na árvore, e propagação no --tac\n"
         "  --help      mostra esta ajuda\n"
@@ -71,6 +73,8 @@ int main(int argc, char **argv) {
             g_options |= OPT_SYMTAB;
         } else if (strcmp(arg, "--tac") == 0) {
             g_options |= OPT_TAC;
+        } else if (strcmp(arg, "--bytecode") == 0) {
+            g_options |= OPT_BYTECODE;
         } else if (strcmp(arg, "-O") == 0) {
             g_options |= OPT_OPTIMIZE;
         } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
@@ -95,7 +99,7 @@ int main(int argc, char **argv) {
     }
 
     /* o Rust so e impresso se nenhuma flag de analise estiver ligada */
-    emit_code = (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC)) == 0;
+   emit_code = (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC | OPT_BYTECODE)) == 0;
 
     yyin = fopen(input, "r");
     if (!yyin) {
@@ -109,7 +113,7 @@ int main(int argc, char **argv) {
     int ret;
     if (g_options & OPT_TOKENS) {
         ret = dump_tokens();
-        if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC)) {
+        if (g_options & (OPT_TREE | OPT_TYPES | OPT_DOT | OPT_SYMTAB | OPT_TAC | OPT_BYTECODE)) {
             /* combinado com uma flag de analise: volta pro comeco do arquivo
                pra que o parser tambem possa rodar em cima dele */
             rewind(yyin);
@@ -159,6 +163,10 @@ int main(int argc, char **argv) {
             tac_generate(parse_root, stdout);
         }
     }
+
+    /* o bytecode tambem so sai pra programa valido (#56) */
+    if (syntax_ok && (g_options & OPT_BYTECODE) && semantic_errors == 0 && lexical_errors == 0)
+        bytecode_generate(parse_root, stdout);
 
     node_free(parse_root);
     parser_cleanup();
