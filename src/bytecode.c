@@ -351,8 +351,14 @@ static void params_collect(const Node *list, const char **names, DataType *types
     (*n)++;
 }
 
+static int params_count(const Node *list) {
+    if (strcmp(list->label, "param_list") != 0) return 1;
+    if (list->n_children == 3)
+        return params_count(list->children[0]) + params_count(list->children[2]);
+    return params_count(list->children[0]);
+}
+
 static void gen_function(const Node *f) {
-    nlabel = 0;
     cur_ret = spec_type(f->children[0]);
     int mark = scope_mark();
 
@@ -362,12 +368,15 @@ static void gen_function(const Node *f) {
        topo: os parametros saem da pilha de tras pra frente */
     const Node *params = f->children[3];
     if (strcmp(params->children[0]->label, "param_list") == 0) {
-        const char *names[64];
-        DataType types[64];
+        int total = params_count(params->children[0]);
+        const char **names = malloc(total * sizeof(char *));
+        DataType *types = malloc(total * sizeof(DataType));
         int n = 0;
         params_collect(params->children[0], names, types, &n);
         for (int i = 0; i < n; i++) var_declare(names[i], types[i]);
         for (int i = n - 1; i >= 0; i--) emit("STORE %s", var_lookup(names[i])->alias);
+        free(names);
+        free(types);
     }
 
     gen_statement_list(f->children[6]);
@@ -382,6 +391,7 @@ static void gen_function_list(const Node *list) {
 
 void bytecode_generate(const Node *root, FILE *dest) {
     out = dest;
+    nlabel = 0;
     gen_function_list(root->children[0]);
     free(brk_label);
     free(cont_label);
