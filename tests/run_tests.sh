@@ -10,6 +10,7 @@
 #   .symtab  -> --symtab, compara o stdout (a tabela de simbolos)
 #   .types   -> --types,  compara o stdout (a arvore com os tipos)
 #   .tac     -> --tac,    compara o stdout (o codigo de tres enderecos)
+#   .bc      -> --bytecode, compara o stdout (o bytecode de maquina de pilha)
 #   .err     -> sem flag, espera exit code != 0 e compara o stderr
 #
 # Com `.opt` antes da extensao, o caso roda com a otimizacao ligada (-O,
@@ -48,6 +49,7 @@ flag_for() {
         .types)  echo "--types" ;;
         .tac)    echo "--tac" ;;
         .dot)    echo "--dot" ;;
+        .bc)     echo "--bytecode" ;;
         *)       echo "" ;;
     esac
 }

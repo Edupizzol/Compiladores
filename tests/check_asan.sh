@@ -34,6 +34,8 @@ combos=(
     "-O"
     "--tac"
     "-O --tac"
+    "--bytecode"
+    "-O --bytecode"
     "--tree --types --dot --symtab"
     "-O --tree --types --dot --symtab"
     "--tokens -O --tac"
