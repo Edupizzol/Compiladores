@@ -16,8 +16,9 @@
    Sem -O nenhum passe roda e a saida e a mesma de antes. */
 
 /* constant folding (#49). Se os operandos da expressao `e` sao literais,
-   troca a subarvore por um unico literal com o resultado, ja com o Rust
-   (`e->code`) e o tipo certos: `2 + 3` vira `expr -> INT_NUMBER (5)`.
+   troca a subarvore por um unico literal com o resultado e o tipo certos:
+   `2 + 3` vira `expr -> INT_NUMBER (5)`. O codegen (#54) gera o Rust da
+   arvore ja dobrada.
 
    Os filhos de `e` tem que estar dobrados antes. O parser chama esta funcao
    em cada `expr` que reduz (se o -O estiver ligado), e como o Bison reduz de

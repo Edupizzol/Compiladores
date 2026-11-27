@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() {
     let mut i: i32 = 0;
     {
         while true {
@@ -8,5 +8,5 @@ fn main() -> i32 {
             
         }
     }
-    return i;
+    std::process::exit(i);
 }

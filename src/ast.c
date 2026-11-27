@@ -34,7 +34,6 @@ void node_free(Node *root) {
         node_free(root->children[i]);
     free(root->children);
     free(root->text);
-    free(root->code);
     free(root);
 }
 

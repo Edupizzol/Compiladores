@@ -2,14 +2,16 @@
 
 Trabalho da disciplina de Compiladores: um transpilador de um subconjunto de C
 para Rust, construído com **Flex** (análise léxica) e **Bison** (análise
-sintática). O parser é dirigido pela sintaxe e, num único passo, faz três
-coisas:
+sintática). O fluxo é:
 
-- monta a **árvore de derivação** do programa;
-- preenche a **tabela de símbolos**, com escopos, e checa os erros
-  semânticos;
-- gera o **Rust**, montado nas ações das regras e guardado no campo `code` de
-  cada nó da árvore.
+1. o parser monta a **árvore de derivação**, preenche a **tabela de
+   símbolos** com escopos, anota o **tipo** de cada expressão e reporta os
+   erros semânticos;
+2. com `-O`, a árvore passa pelos passes de otimização (`src/optimize.c`,
+   `src/tac_opt.c`) durante o próprio parse;
+3. o gerador de código (`src/codegen.c`) percorre a árvore anotada e imprime
+   o **Rust**. O TAC (`src/tac.c`) e o bytecode de máquina de pilha
+   (`src/bytecode.c`) saem da mesma árvore, pelas suas flags.
 
 ## Como buildar e rodar
 
@@ -19,7 +21,8 @@ Pré-requisitos: `gcc`, `bison`, `flex` (e `graphviz`, só pra desenhar a
 ```bash
 make          # gera parser.tab.c/h (bison), lex.yy.c (flex) e o binário `compiler`
 make run      # roda o compiler em cima de tests/inputs/exemplo.c
-make test     # roda a suíte de regressão (tests/expected/) e a sanidade da árvore
+make test     # roda a suíte de regressão (tests/expected/), a sanidade da árvore
+              # e os testes de ponta a ponta com rustc e gcc
 make asan     # builda com ASan/UBSan e roda todos os inputs, com e sem -O
 make clean    # remove os artefatos gerados
 
@@ -28,6 +31,7 @@ make clean    # remove os artefatos gerados
 ./compiler --tree arquivo.c     # imprime a árvore de derivação em texto
 ./compiler --types arquivo.c    # imprime a árvore com o tipo de cada expressão
 ./compiler --tac arquivo.c      # imprime o código de três endereços (TAC)
+./compiler --bytecode arquivo.c # imprime o bytecode de máquina de pilha
 ./compiler --dot arquivo.c      # exporta a árvore em Graphviz (DOT)
 ./compiler --symtab arquivo.c   # imprime a tabela de símbolos
 ./compiler -O arquivo.c         # liga as otimizações (combina com qualquer flag)
@@ -35,9 +39,10 @@ make clean    # remove os artefatos gerados
 ```
 
 As flags podem ser combinadas, por exemplo `./compiler --tree --symtab
-arquivo.c`. A saída sai sempre na ordem tokens, árvore, árvore com tipos, DOT, tabela e TAC. Com
-qualquer flag de análise ligada (`--tree`, `--types`, `--dot`, `--symtab`, `--tac`) o Rust **não**
-é impresso, porque a saída passa a ser a análise. O `--tokens` combinado com
+arquivo.c`. A saída sai sempre na ordem tokens, árvore, árvore com tipos,
+DOT, tabela, TAC e bytecode. Com qualquer flag de análise ligada (`--tree`,
+`--types`, `--dot`, `--symtab`, `--tac`, `--bytecode`) o Rust **não** é
+impresso, porque a saída passa a ser a análise. O `--tokens` combinado com
 uma delas lista os tokens e depois roda o parser no mesmo arquivo.
 
 Exit code: 0 se o programa é válido e ≠ 0 em erro léxico, sintático ou
@@ -53,27 +58,33 @@ Os arquivos gerados por bison/flex (`parser.tab.c`, `parser.tab.h`,
 ```
 src/
   lexer.l        # regras léxicas (flex); preenche yylloc pra linha de cada token
-  parser.y       # gramática; as ações montam a árvore, a tabela e o Rust
+  parser.y       # gramática; as ações montam a árvore e a tabela e checam os tipos
   ast.h/.c       # Node da árvore, construção/liberação, tree_print e tree_to_dot
   symtab.h/.c    # tabela de símbolos: hash por nome, pilha e histórico de escopos
   symtab_dump.h/.c # formatação da tabela pro --symtab
   semantic.h/.c  # semantic_error(), a checagem das chamadas e as regras de tipo
+  optimize.h/.c  # passes com -O sobre a árvore: fold_constants, simplify_algebraic,
+                 #   eliminate_dead_code e drop_after_jump
+  codegen.h/.c   # gera o Rust a partir da árvore anotada (sai pelo stdout)
   tac.h/.c       # gerador de código de três endereços (--tac)
   tac_opt.h/.c   # otimização do TAC com -O (propagação e temporários mortos)
+  bytecode.h/.c  # gerador de bytecode de máquina de pilha (--bytecode)
   types.h        # DataType, ValueData, type_to_rust() e type_to_c()
   options.h      # flags de CLI (OPT_*) e o switch emit_code
-  codegen.h      # reservado para separar o codegen do parser (vazio)
   main.c         # CLI: lê as flags, roda o parser e imprime o que foi pedido
-tests/inputs/        # arquivos .c de entrada
-tests/expected/      # saída esperada de cada input (.rs, .tree, .dot, .symtab, .err)
-tests/run_tests.sh   # runner da suíte de regressão (chamado pelo make test)
+tests/inputs/              # arquivos .c de entrada
+tests/expected/            # saída esperada de cada input (.rs, .tree, .dot, .symtab, .err, .tac, .bc)
+tests/run_tests.sh         # runner da suíte de regressão (chamado pelo make test)
 tests/check_tree_tokens.sh # sanidade: folhas da árvore x tokens do léxico
+tests/check_rust.sh        # ponta a ponta: rustc compila o Rust, e o exit code bate com o do gcc
+tests/check_asan.sh        # roda todos os inputs sob ASan/UBSan, com e sem -O
 ```
 
 No `parser.y`, o valor semântico de todo não-terminal é um `Node *`. A ação
-de cada regra cria o nó com o helper `mk(label, linha, code, filhos...,
-NULL)`. A linha de cada símbolo vem de `@N.first_line` (`%locations`).
-`yylineno` não serve, porque pode estar adiantado pelo lookahead.
+de cada regra cria o nó com o helper `mk(label, linha, filhos..., NULL)`,
+anota o `type` quando é expressão e deixa o Rust pro `codegen.c`. A linha de
+cada símbolo vem de `@N.first_line` (`%locations`). `yylineno` não serve,
+porque pode estar adiantado pelo lookahead.
 
 ## Árvore de derivação
 
@@ -169,12 +180,21 @@ assinatura (`int (void)` quando não têm parâmetros).
 | chamada de função inexistente | `função 'g' não declarada` |
 | número de argumentos errado | `função 'f' espera 1 argumento(s), mas recebeu 2` |
 | nome de função usado como variável | `'f' é uma função, não uma variável` |
+| variável lida no próprio inicializador (`int x = x;`) | `variável 'x' usada na própria inicialização` |
+| função não `void` que pode chegar ao fim sem `return` | `função 'f' pode chegar ao fim sem return` |
 
 Todas saem em stderr no formato do erro sintático: `Erro semântico na linha
 N: <mensagem>`. Os erros não param o parse, e todos saem no fim, ordenados
 por linha. Programa com erro semântico não gera Rust e sai com exit code 1,
 mas o `--tree` e o `--symtab` ainda imprimem a árvore e a tabela, o que
 ajuda a depurar.
+
+Como em C, a variável existe a partir do nome: em `int x = x;` o `x` da
+direita já é a variável nova, mesmo com outro `x` visível de fora, e ela
+ainda não tem valor. A checagem do `return` segue a regra do Rust: vale um
+`return` no próprio bloco, um bloco `{ }` que sempre retorna ou um `if/else`
+com `return` nos dois lados. Laço não conta, e o `main` fica de fora (em C
+ele devolve 0 se chegar ao fim).
 
 Como a gramática não tem protótipos, as chamadas de função são checadas só
 no fim do programa. Assim, chamar uma função definida mais abaixo no arquivo
@@ -207,7 +227,27 @@ Uma chamada a função definida **depois** do uso não tem o tipo conhecido
 enquanto o parser lê a expressão. No fim do programa a árvore é percorrida de
 novo e esses tipos são resolvidos (por isso o `--types` e o TAC saem certos),
 mas os erros de tipo *dentro* dessas expressões não são checados: só os
-argumentos `void` e a aridade. O Rust gerado também fica sem os casts delas.
+argumentos `void` e a aridade. O Rust gerado usa a assinatura completa, então
+os casts saem certos.
+
+### Rust que compila
+
+O codegen (`src/codegen.c`) cuida das diferenças que fariam o `rustc`
+recusar o código:
+
+- comparação, `&&`, `||` e `!` dão `bool` no Rust. Usados como número, viram
+  `((a < b) as i32)`; numa condição, ficam como estão;
+- número como condição (`if (x)`, `while (n)`, lado de `&&`/`||`) vira
+  `(x != 0)` (`0.0` para float/double). O `!x` de um número vira `(x == 0)`,
+  porque o `!` do Rust num inteiro inverte os bits;
+- o `main` do Rust não devolve valor: `int main()` vira `fn main()`, e o
+  `return v;` dele vira `std::process::exit(v);`. Programa sem `main` ganha um
+  `fn main() {}` vazio;
+- parâmetro sai como `mut` (`fn f(mut n: i32)`), porque em C ele é uma
+  variável local comum e pode receber valor (`n = n - 1`);
+- `for` vira um `while` com o passo no fim do corpo, e o `continue` de um
+  `for` sai como `passo; continue;`, senão o passo seria pulado e o laço não
+  terminaria.
 
 ## Código de três endereços (TAC)
 
@@ -259,28 +299,116 @@ return 7
 A propagação não passa de um bloco básico para outro. Sem `-O`, o TAC
 continua o mesmo.
 
+## Bytecode de máquina de pilha (`--bytecode`)
+
+`./compiler --bytecode` percorre a mesma árvore anotada do TAC e imprime o
+bytecode de uma máquina de pilha, no formato do exemplo do professor
+(semana 10). Combina com `-O`: o bytecode sai da árvore já otimizada, então
+`int x = 3 + 4;` vira só `LOAD_CONST 7` / `STORE x`.
+
+`int x = a + b * c;` fica:
+
+```
+LOAD a
+LOAD b
+LOAD c
+MUL
+ADD
+STORE x
+```
+
+Instruções: `LOAD_CONST`, `LOAD`, `STORE`, `ADD`, `SUB`, `MUL`, `DIV`,
+`MOD`, `BIT_AND`, `BIT_OR`, `BIT_XOR`, `SHL`, `SHR`, `EQ`, `NE`, `LT`, `GT`,
+`LE`, `GE`, `NOT`, `NEG`, `JUMP`, `JUMP_IF_FALSE`, `LABEL`, `CALL f n`,
+`RET`. Conversões de tipo geram `I2F`, `I2D`, `F2I`, `F2D`, `D2I`, `D2F` a
+partir do tipo anotado de cada nó (`int` e `char` são o mesmo tipo na
+pilha).
+
+- `&&` e `||` com curto-circuito (o segundo operando só é avaliado quando
+  precisa);
+- cada função começa com `LABEL nome`, `break`/`continue` viram `JUMP` pro
+  fim e pro próximo passo do laço;
+- chamada: o chamador empilha os argumentos em ordem; a função os tira com
+  `STORE`, do último pro primeiro; `RET` devolve o valor do topo;
+- escopos aninhados usam o mesmo esquema de alias do TAC (`x`, `x.1`),
+  porque o bytecode também não tem escopos;
+- `POP` está no conjunto mas nenhum código gera, porque o subconjunto não
+  tem expressão como comando (só atribuição, declaração, `return`, `if` e
+  laços).
+
+Programa com erro léxico, sintático ou semântico não gera bytecode.
+
 ## Otimização (`-O`)
 
 A flag `-O` liga todas as otimizações e combina com qualquer outra: sem flag
-de análise sai o Rust otimizado, e com `--tree`, `--types` ou `--tac` sai a
-análise do programa otimizado. Sem `-O`, nenhum passe roda e a saída é
-idêntica à de antes.
+de análise sai o Rust otimizado, e com `--tree`, `--types`, `--tac` ou
+`--bytecode` sai a análise do programa otimizado. Sem `-O`, nenhum passe
+roda e a saída é idêntica à de antes.
 
 Os passes rodam sempre na mesma ordem (ver `src/optimize.h`):
 
-1. **constant folding** (`2 + 3 * 4` → `14`), em cada `expr` que o parser
-   reduz;
-2. **simplificações algébricas** (`x * 1` → `x`, `x * 0` → `0`, `x * 2` →
-   `x << 1`), na mesma `expr`, logo depois do folding;
-3. **código morto** (`if` com condição constante, `while`/`for` que nunca
-   rodam, comando depois de `return`/`break`/`continue`), em cada comando,
-   depois que as expressões dele já foram dobradas;
-4. **otimização do TAC** (seção acima), só com `--tac`.
+### 1. Constant folding — `src/optimize.c`, `fold_constants()`
+
+Em cada `expr` que o parser reduz (pós-ordem), se os operandos forem
+literais, troca a subárvore por um literal com o resultado e o tipo certos.
+Respeita a divisão truncada de C (`7/2 → 3`, `5/2.0 → 2.5`) e cobre todos
+os operadores (aritmética, `%`, bit a bit, shifts, comparações e `&&`, `||`,
+`!`; comparações viram `true`/`false` no Rust e `0`/`1` no TAC).
+
+| antes          | depois |
+| -------------- | ------ |
+| `2 + 3 * 4`    | `14`   |
+| `(1+2)*(3+4)`  | `21`   |
+| `5 == 2 + 3`   | `true` |
+
+Não dobra o que mudaria o comportamento: divisão ou `%` por zero, overflow
+de `int`, shift negativo ou ≥ 32, resultado float infinito/NaN, e expressão
+com erro de tipo (ver `tests/inputs/opt_sem_folding.c`).
+
+### 2. Simplificações algébricas — `simplify_algebraic()`
+
+Na mesma `expr`, logo depois do folding, pra pegar os casos com variável
+(que o folding não dobra):
+
+| categoria          | antes                                              | depois            |
+| ------------------ | -------------------------------------------------- | ----------------- |
+| elemento neutro    | `x+0`, `0+x`, `x-0`, `x*1`, `1*x`, `x/1`, `x\|0`, `x^0`, `x<<0`, `x>>0` | `x` |
+| mudança de tipo    | `x * 1.0` (com `x` int)                            | `x as f64`        |
+| elemento absorvente | `x*0`, `x&0` (só int, sem chamada em `x`)         | `0`               |
+| redução de força   | `x*2`, `2*x` (só int)                              | `x << 1`          |
+
+Por rodar depois do folding no mesmo percurso, pega também `x * (3 - 2)` →
+`x * 1` → `x`. `f() * 0` continua chamando `f()`, porque o absorvente é
+bloqueado por efeito colateral. Não mexe em `x-x` nem em `x/x` (quebram com
+float NaN e com `x = 0`).
+
+### 3. Código morto — `eliminate_dead_code()` e `drop_after_jump()`
+
+Chamado em cada `statement` que reduz, depois que as expressões dele já
+passaram pelos passes 1 e 2:
+
+| antes                                           | depois                      |
+| ----------------------------------------------- | --------------------------- |
+| `if (2 > 3) a = 1; else a = 2;`                 | `a = 2;`                    |
+| `while (0) a = 1;`                              | *(apagado)*                 |
+| `for (int i = 0; 0; i++) a = 1;`                | `int i = 0;` *(só o init)*  |
+| `return 1; a = 2;`                              | `return 1;`                 |
+
+O comando que vem depois de `return`, `break` ou `continue` na mesma lista é
+apagado por `drop_after_jump`. Não gera aviso no stderr (iria quebrar os
+testes `.err`).
+
+### 4. Otimização do TAC — `src/tac_opt.c`
+
+Só com `--tac -O`. Já descrito na seção **TAC otimizado** acima: remove
+rótulos não usados, propaga constantes e cópias dentro de cada bloco básico,
+e tira os temporários mortos. Roda por função, sobre o TAC já gerado da
+árvore otimizada.
+
+---
 
 Os três exemplos da semana 9 (`tests/inputs/opt_semana9.c`) saem como `14`,
-`5 + x * 4` e `21`. O que mudaria o comportamento não é dobrado: divisão ou
-`%` por zero, overflow de int, shift fora de 0..31 e `f() * 0`, que continua
-chamando `f()` (`tests/inputs/opt_sem_folding.c`).
+`5 + x * 4` e `21` no Rust e no TAC com `-O`.
 
 ## O que já funciona
 
@@ -314,9 +442,10 @@ chamando `f()` (`tests/inputs/opt_sem_folding.c`).
 - Tokens que o léxico reconhece mas a gramática não usa: `++`/`--`,
   atribuição composta, `.`, `->`, `struct` e literais de char/string.
 - Ponteiros e arrays.
-- Checagem de tipos das expressões (a tabela guarda os tipos, mas `int x =
-  2.5;` não é erro).
-- Protótipos de função.
+- Protótipos de função (o `check_rust.sh` injeta na mão antes do gcc).
+- Variável lida antes de receber valor (`int x; return x;`): é válido em C,
+  mas o `rustc` recusa (E0381), então esses inputs ficam fora da parte 2
+  dos testes de ponta a ponta.
 
 ## Testando
 
@@ -332,6 +461,10 @@ chamando `f()` (`tests/inputs/opt_sem_folding.c`).
 - `symtab_basico.c` e `simbolos_*.c`: escopos, sombreamento, recursão e
   função definida depois;
 - `erro_*.c`: um erro semântico por arquivo;
+- `e2e_*.c`: programas que calculam algo, para a comparação com o `gcc`;
+- `rust_*.c`: os casos em que o Rust gerado precisa de ajuste pra compilar
+  (bool como valor, número como condição, `main`, programa sem `main` e
+  chamada adiantada).
 - `opt_*.c`: os casos do `-O` (folding da semana 9, o que não pode dobrar,
   código morto e propagação no TAC).
 
@@ -353,6 +486,7 @@ esperado que decide a flag passada pro compilador:
 | `<nome>.symtab`    | `--symtab`   | stdout: a tabela de símbolos             |
 | `<nome>.types`     | `--types`    | stdout: a árvore com os tipos            |
 | `<nome>.tac`       | `--tac`      | stdout: o código de três endereços       |
+| `<nome>.bc`        | `--bytecode` | stdout: o bytecode de máquina de pilha   |
 | `<nome>.err`       | *(nenhuma)*  | stderr, e o exit code tem que ser ≠ 0    |
 | `<nome>.opt.<ext>` | `-O` + a de `<ext>` | o mesmo que `<ext>`, com otimização |
 
@@ -377,6 +511,42 @@ Depois da suíte, o `make test` roda a sanidade da árvore
 (`tests/check_tree_tokens.sh`): as folhas da árvore, lidas em ordem, têm que
 bater com os tokens do `--tokens`, com a pontuação incluída.
 
+### Ponta a ponta com `rustc` e `gcc`
+
+Por último, o `make test` roda `tests/check_rust.sh`, que confere o Rust de
+verdade em vez de só compará-lo com o esperado:
+
+1. cada `.rs` de `tests/expected/` (inclusive os `.opt.rs`) tem que compilar
+   no `rustc`;
+2. cada input válido com `main` é compilado com o `gcc` e, pelo nosso
+   compilador, com o `rustc`, sem e com `-O`. Os três programas rodam e têm
+   que sair com o mesmo exit code. O subconjunto não tem `printf`, então o
+   resultado sai pelo `return` do `main` (no Rust, `std::process::exit`).
+   Um laço infinito estoura o limite de 5 s e conta como falha.
+
+Como o subconjunto deixa chamar uma função antes de defini-la e o `gcc` não
+aceita declaração implícita, o script põe os protótipos das funções no
+começo do `.c` antes de compilar. Sem `rustc` instalado, o script só avisa e
+passa; sem `gcc`, pula a parte 2.
+
+Os inputs `e2e_*.c` existem para essa comparação: fatorial (recursivo e com
+`while`), fibonacci (com `for` e recursivo), soma com `for`, `break` e
+`continue`, e conversões entre `int`, `double` e `char`.
+
+Inputs que ficam de fora (a lista `SKIP` no script):
+
+| input                      | motivo                                                                 |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `tarefa2_controle_fluxo.c` | lê variável sem valor (`int i; if (i)`): UB em C, e o `rustc` recusa com E0381 |
+| `tac_expressoes.c`         | lê variável sem valor (`char ch;`): UB em C, e o `rustc` recusa com E0381 |
+| `tac_otimizacao.c`         | divide por zero de propósito (`c / 0`): UB em C, e o `rustc` recusa (`unconditional_panic`) |
+| `opt_sem_folding.c`        | divide por zero de propósito (`5 / 0`): UB em C, e o `rustc` recusa (`unconditional_panic`) |
+
+Os quatro testam outra coisa (o parser, o TAC e o que o `-O` não pode dobrar)
+e foram escritos assim de propósito.
+
+### ASan/UBSan
+
 O `make asan` builda o compilador de novo com `-fsanitize=address,undefined`
 (em `compiler-asan`) e roda `tests/check_asan.sh`: todos os inputs, com e sem
 `-O` e com as flags de análise, e falha se o ASan, o LeakSanitizer ou o UBSan
@@ -396,12 +566,32 @@ esperados hoje são os de `IF`/`ELSE`/... redeclarados.
 
 ## Acompanhamento
 
-O trabalho está dividido nas issues do repositório:
+O trabalho está dividido nas issues do repositório, uma por entrega, com
+assignee por pessoa:
 
 - [Sprint 4: árvore de derivação (#12)](https://github.com/Edupizzol/Compiladores/issues/12),
   com as sub-issues #14 a #20;
 - [Sprint 5: tabela de símbolos e fechamento (#13)](https://github.com/Edupizzol/Compiladores/issues/13),
-  com as sub-issues #21 a #28.
+  com as sub-issues #21 a #28;
+- Sprint 6: verificação de tipos (#44);
+- Sprint 7: código de três endereços (#45);
+- [Sprint 8: otimização de código (#59)](https://github.com/Edupizzol/Compiladores/issues/59),
+  com as sub-issues #49 a #53;
+- [Sprint 9: geração de código final (#60)](https://github.com/Edupizzol/Compiladores/issues/60),
+  com as sub-issues #54 a #58.
 
 As tarefas são divididas por área da gramática pra minimizar conflito de
 merge no `parser.y`.
+
+### Co-autoria dos commits
+
+Vários commits do repositório têm linhas `Co-Authored-By:` no fim da
+mensagem. Elas marcam os dias em que a gente se encontrou presencialmente
+(geralmente por conta das aulas) e revisou ou escreveu o código junto —
+**não** querem dizer que a pessoa co-autora fez metade da tarefa, só que
+estava ali e contribuiu.
+
+Pra rastrear o que cada um fez (ou devia ter feito), o canal certo é a
+aba de **issues**: cada entrega tem uma issue com assignee, e o PR que
+fecha a issue aparece linkado nela. O histórico dos assignees e dos PRs
+mergeados é a fonte da divisão real do trabalho.
